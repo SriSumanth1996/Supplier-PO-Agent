@@ -26,8 +26,6 @@ def authenticate_gmail():
     CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
     REFRESH_TOKEN = st.secrets["REFRESH_TOKEN"]
 
-    from google.oauth2.credentials import Credentials
-
     creds = Credentials(
         token=None,
         refresh_token=REFRESH_TOKEN,
@@ -41,7 +39,6 @@ def authenticate_gmail():
         creds.refresh(Request())
 
     return build('gmail', 'v1', credentials=creds)
-
 
 def get_email_body(msg_payload):
     """Extract the full body text from the email payload."""
@@ -70,7 +67,6 @@ def get_email_body(msg_payload):
 
     return body
 
-
 qa_mapping = {
     "What is the product?": "product",
     "How many units?": "quantity",
@@ -80,9 +76,8 @@ qa_mapping = {
     "What is the Lead Time?": "lead_time",
     "What are the payment terms?": "payment_terms",
     "Is there any validity period for this quote?": "validity_period",
-    "Where is the supplier located?": "supplier_place"  # NEW FIELD
+    "Where is the supplier located?": "supplier_place"
 }
-
 
 def ask_groq(question, context):
     prompt = f"""
@@ -100,7 +95,7 @@ def ask_groq(question, context):
     try:
         chat_completion = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile",  # Or mixtral-8x7b-32768
+            model="llama-3.3-70b-versatile",
             temperature=1,
             max_tokens=100,
             top_p=1.0,
@@ -112,14 +107,12 @@ def ask_groq(question, context):
     except Exception as e:
         return f"Error: {str(e)}"
 
-
 def extract_quotation_data(context):
     response_json = {}
     for question, key in qa_mapping.items():
         answer = ask_groq(question, context)
         response_json[key] = answer
     return response_json
-
 
 def main():
     if st.button("Fetch & Parse Supplier Emails"):
@@ -136,7 +129,8 @@ def main():
             st.warning("No messages found.")
             return
 
-        df_columns = ["Name", "Email", "Place", "Lead days", "Unit Cost", "Units", "Total Cost"]
+        # Updated DataFrame columns to include Received Time
+        df_columns = ["Received Time", "Name", "Email", "Place", "Lead Days", "Unit Cost", "Units", "Total Cost"]
         df_rows = []
 
         for message in messages[:5]:  # Check recent 5 emails
@@ -153,13 +147,14 @@ def main():
 
                 name = sender.split("<")[0].strip() if "<" in sender else sender
                 email_address = sender.split("<")[1][:-1] if "<" in sender else sender
-                place = "Unknown"
+                place = quotation_data.get("supplier_place", "Not present")  # Use supplier_place from quotation_data
                 lead_days = quotation_data.get("lead_time", "Not present").replace("–", "-") if quotation_data.get("lead_time") != "Not present" else "Not present"
                 unit_cost = quotation_data.get("unit_price", "Not present").replace("$", "").strip()
                 units = quotation_data.get("quantity", "Not present")
                 total_cost = quotation_data.get("total_cost", "Not present").replace("$", "").strip()
 
-                df_rows.append([name, email_address, place, lead_days, unit_cost, units, total_cost])
+                # Add received_at as the first column
+                df_rows.append([received_at, name, email_address, place, lead_days, unit_cost, units, total_cost])
 
                 with st.expander(f"📩 {subject} — {sender}"):
                     st.markdown(f"**Received:** {received_at}")
@@ -176,11 +171,10 @@ def main():
             # Export to Excel
             file_name = "supplier_quotations.xlsx"
             df.to_excel(file_name, index=False)
-            with open(file_name, "rb") as f:
+            with open(file_name, "rbDaemon Thread [MainThread] (MainThread) as f:
                 st.download_button("📥 Download Excel File", f, file_name=file_name)
         else:
             st.info("No matching supplier emails found.")
-
 
 if __name__ == '__main__':
     main()
