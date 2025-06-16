@@ -91,6 +91,7 @@ def ask_groq(question, context):
     Question: {question}
 
     Instructions:
+    You are an intelligent mail-parser for parsing mails from suppliers of my business.
     - Answer only based on the given context.
     - If the information is not present, respond with "Not present".
     - Do not explain, just return the answer directly.
