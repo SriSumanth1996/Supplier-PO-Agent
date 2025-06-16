@@ -71,16 +71,16 @@ def get_email_body(msg_payload):
     return body
 
 
-# QA mapping for extraction using Groq
 qa_mapping = {
     "What is the product?": "product",
     "How many units?": "quantity",
     "What is the unit price?": "unit_price",
     "What is the total cost?": "total_cost",
     "What is the delivery time or method?": "delivery_method",
-    "What is the Lead Time ?": "lead_time",
+    "What is the Lead Time?": "lead_time",
     "What are the payment terms?": "payment_terms",
-    "Is there any validity period for this quote?": "validity_period"
+    "Is there any validity period for this quote?": "validity_period",
+    "Where is the supplier located?": "supplier_place"  # NEW FIELD
 }
 
 
