@@ -18,19 +18,26 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
 
 def authenticate_gmail():
-    """Authenticate with Gmail API using OAuth."""
-    creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
+    """Authenticate with Gmail API using secrets stored in Streamlit."""
+    from google.oauth2.credentials import Credentials
+
+    CLIENT_ID = st.secrets["CLIENT_ID"]
+    CLIENT_SECRET = st.secrets["CLIENT_SECRET"]
+    REFRESH_TOKEN = st.secrets["REFRESH_TOKEN"]
+    SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'] 
+
+    creds = Credentials(
+        token=None,
+        refresh_token=REFRESH_TOKEN,
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token", 
+        scopes=SCOPES,
+    )
+
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+
     return build('gmail', 'v1', credentials=creds)
 
 
