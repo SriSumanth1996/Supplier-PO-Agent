@@ -113,12 +113,27 @@ def fetch_emails():
         st.error(f"Error fetching emails: {str(e)}")
         return []
 
-
-# Main UI
+# Main
 if st.button("Fetch Latest Emails"):
     emails = fetch_emails()
     if emails:
         st.success(f"Found {len(emails)} email(s) from supplier(s).")
-        st.json(emails)
+
+        # Convert list of dicts to DataFrame
+        import pandas as pd
+        df = pd.DataFrame(emails)
+
+        # Optional: Clean up 'from' field to extract just email if needed
+        df['email'] = df['from'].str.extract(r'<([^>]+)>')  # Extract email only
+
+        # Display as a clean table
+        st.dataframe(df)
+
+        # Optional: Expand body for readability
+        for idx, row in df.iterrows():
+            with st.expander(f"Email {idx+1}: {row['subject']} from {row['from']}"):
+                st.markdown(f"**Received at:** {row['received_at']}")
+                st.markdown(f"**Body:**\n{row['body']}")
+
     else:
         st.info("No matching supplier emails found.")
