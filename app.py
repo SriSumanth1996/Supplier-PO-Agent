@@ -71,18 +71,17 @@ def get_email_body(msg_payload):
     return body
 
 
-# QA mapping for extraction using Groq
 qa_mapping = {
     "What is the product?": "product",
     "How many units?": "quantity",
     "What is the unit price?": "unit_price",
     "What is the total cost?": "total_cost",
     "What is the delivery time or method?": "delivery_method",
-    "What is the Lead Time ?": "lead_time",
+    "What is the Lead Time?": "lead_time",
     "What are the payment terms?": "payment_terms",
-    "Is there any validity period for this quote?": "validity_period"
+    "Is there any validity period for this quote?": "validity_period",
+    "Where is the supplier located?": "supplier_place"  # NEW FIELD
 }
-
 
 def ask_groq(question, context):
     prompt = f"""
@@ -135,7 +134,7 @@ def main():
             st.warning("No messages found.")
             return
 
-        df_columns = ["Name", "Email", "Place", "Lead days", "Unit Cost", "Units", "Total Cost"]
+        df_columns = ["Received At", "Name", "Email", "Place", "Lead days", "Unit Cost", "Units", "Total Cost"]
         df_rows = []
 
         for message in messages[:5]:  # Check recent 5 emails
@@ -144,42 +143,34 @@ def main():
             sender = [h['value'] for h in headers if h['name'] == 'From'][0]
 
             if supplier_email in sender:
-                subject = [h['value'] for h in headers if h['name'] == 'Subject'][0]
                 received_at = [h['value'] for h in headers if h['name'] == 'Date'][0]
+                subject = [h['value'] for h in headers if h['name'] == 'Subject'][0]
                 body = get_email_body(msg['payload'])
 
                 quotation_data = extract_quotation_data(body)
 
                 name = sender.split("<")[0].strip() if "<" in sender else sender
                 email_address = sender.split("<")[1][:-1] if "<" in sender else sender
-                place = "Unknown"
+                place = quotation_data.get("supplier_place", "Not present").strip("[]\"'") or "Unknown"
                 lead_days = quotation_data.get("lead_time", "Not present").replace("–", "-") if quotation_data.get("lead_time") != "Not present" else "Not present"
                 unit_cost = quotation_data.get("unit_price", "Not present").replace("$", "").strip()
                 units = quotation_data.get("quantity", "Not present")
                 total_cost = quotation_data.get("total_cost", "Not present").replace("$", "").strip()
 
-                df_rows.append([name, email_address, place, lead_days, unit_cost, units, total_cost])
-
-                with st.expander(f"📩 {subject} — {sender}"):
-                    st.markdown(f"**Received:** {received_at}")
-                    st.markdown("**Raw Email Body:**")
-                    st.text(body)
-                    st.markdown("**Parsed Data:**")
-                    st.json(quotation_data)
+                df_rows.append([
+                    received_at,
+                    name,
+                    email_address,
+                    place,
+                    lead_days,
+                    unit_cost,
+                    units,
+                    total_cost
+                ])
 
         if df_rows:
             df = pd.DataFrame(df_rows, columns=df_columns)
             st.success("✅ Parsed supplier quotes:")
             st.dataframe(df)
-
-            # Export to Excel
-            file_name = "supplier_quotations.xlsx"
-            df.to_excel(file_name, index=False)
-            with open(file_name, "rb") as f:
-                st.download_button("📥 Download Excel File", f, file_name=file_name)
         else:
             st.info("No matching supplier emails found.")
-
-
-if __name__ == '__main__':
-    main()
