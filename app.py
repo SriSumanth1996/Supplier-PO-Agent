@@ -18,7 +18,7 @@ GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 client = Groq(api_key=GROQ_API_KEY)
 
 # Gmail Scopes
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'] 
+SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']   
 
 def authenticate_gmail():
     """Authenticate using secrets stored in Streamlit."""
@@ -33,7 +33,7 @@ def authenticate_gmail():
         refresh_token=REFRESH_TOKEN,
         client_id=CLIENT_ID,
         client_secret=CLIENT_SECRET,
-        token_uri="https://oauth2.googleapis.com/token", 
+        token_uri="https://oauth2.googleapis.com/token",   
         scopes=SCOPES,
     )
 
@@ -171,5 +171,15 @@ def main():
             df = pd.DataFrame(df_rows, columns=df_columns)
             st.success("✅ Parsed supplier quotes:")
             st.dataframe(df)
+
+            # Export to Excel
+            file_name = "supplier_quotations.xlsx"
+            df.to_excel(file_name, index=False)
+            with open(file_name, "rb") as f:
+                st.download_button("📥 Download Excel File", f, file_name=file_name)
         else:
             st.info("No matching supplier emails found.")
+
+
+if __name__ == '__main__':
+    main()
