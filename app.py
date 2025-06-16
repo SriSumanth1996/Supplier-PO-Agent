@@ -121,56 +121,60 @@ def extract_quotation_data(context):
 
 def main():
     if st.button("Fetch & Parse Supplier Emails"):
-        with st.spinner("Authenticating with Gmail..."):
-            service = authenticate_gmail()
+        try:
+            with st.spinner("Authenticating with Gmail..."):
+                service = authenticate_gmail()
 
-        supplier_email = "supplier123.sample@gmail.com"
+            supplier_email = "supplier123.sample@gmail.com"
 
-        with st.spinner("Fetching emails..."):
-            results = service.users().messages().list(userId='me', labelIds=['INBOX']).execute()
-            messages = results.get('messages', [])
+            with st.spinner("Fetching emails..."):
+                results = service.users().messages().list(userId='me', labelIds=['INBOX']).execute()
+                messages = results.get('messages', [])
 
-        if not messages:
-            st.warning("No messages found.")
-            return
+            if not messages:
+                st.warning("No messages found.")
+                return
 
-        df_columns = ["Received At", "Name", "Email", "Place", "Lead days", "Unit Cost", "Units", "Total Cost"]
-        df_rows = []
+            df_columns = ["Received At", "Name", "Email", "Place", "Lead days", "Unit Cost", "Units", "Total Cost"]
+            df_rows = []
 
-        for message in messages[:5]:  # Check recent 5 emails
-            msg = service.users().messages().get(userId='me', id=message['id']).execute()
-            headers = msg['payload']['headers']
-            sender = [h['value'] for h in headers if h['name'] == 'From'][0]
+            for message in messages[:5]:  # Check recent 5 emails
+                msg = service.users().messages().get(userId='me', id=message['id']).execute()
+                headers = msg['payload']['headers']
+                sender = [h['value'] for h in headers if h['name'] == 'From'][0]
 
-            if supplier_email in sender:
-                received_at = [h['value'] for h in headers if h['name'] == 'Date'][0]
-                subject = [h['value'] for h in headers if h['name'] == 'Subject'][0]
-                body = get_email_body(msg['payload'])
+                if supplier_email in sender:
+                    received_at = [h['value'] for h in headers if h['name'] == 'Date'][0]
+                    body = get_email_body(msg['payload'])
 
-                quotation_data = extract_quotation_data(body)
+                    quotation_data = extract_quotation_data(body)
 
-                name = sender.split("<")[0].strip() if "<" in sender else sender
-                email_address = sender.split("<")[1][:-1] if "<" in sender else sender
-                place = quotation_data.get("supplier_place", "Not present").strip("[]\"'") or "Unknown"
-                lead_days = quotation_data.get("lead_time", "Not present").replace("–", "-") if quotation_data.get("lead_time") != "Not present" else "Not present"
-                unit_cost = quotation_data.get("unit_price", "Not present").replace("$", "").strip()
-                units = quotation_data.get("quantity", "Not present")
-                total_cost = quotation_data.get("total_cost", "Not present").replace("$", "").strip()
+                    name = sender.split("<")[0].strip() if "<" in sender else sender
+                    email_address = sender.split("<")[1][:-1] if "<" in sender else sender
+                    place = quotation_data.get("supplier_place", "Not present").strip("[]\"'") or "Unknown"
+                    lead_days = quotation_data.get("lead_time", "Not present").replace("–", "-") if quotation_data.get("lead_time") != "Not present" else "Not present"
+                    unit_cost = quotation_data.get("unit_price", "Not present").replace("$", "").strip()
+                    units = quotation_data.get("quantity", "Not present")
+                    total_cost = quotation_data.get("total_cost", "Not present").replace("$", "").strip()
 
-                df_rows.append([
-                    received_at,
-                    name,
-                    email_address,
-                    place,
-                    lead_days,
-                    unit_cost,
-                    units,
-                    total_cost
-                ])
+                    df_rows.append([
+                        received_at,
+                        name,
+                        email_address,
+                        place,
+                        lead_days,
+                        unit_cost,
+                        units,
+                        total_cost
+                    ])
 
-        if df_rows:
-            df = pd.DataFrame(df_rows, columns=df_columns)
-            st.success("✅ Parsed supplier quotes:")
-            st.dataframe(df)
-        else:
-            st.info("No matching supplier emails found.")
+            if df_rows:
+                df = pd.DataFrame(df_rows, columns=df_columns)
+                st.success("✅ Parsed supplier quotes:")
+                st.dataframe(df)
+            else:
+                st.info("No matching supplier emails found.")
+
+        except Exception as e:
+            st.error(f"🚨 An error occurred: {str(e)}")
+            st.exception(e)  # Shows detailed traceback
