@@ -171,15 +171,5 @@ def main():
             df = pd.DataFrame(df_rows, columns=df_columns)
             st.success("✅ Parsed supplier quotes:")
             st.dataframe(df)
-
-            # Export to Excel
-            file_name = "supplier_quotations.xlsx"
-            df.to_excel(file_name, index=False)
-            with open(file_name, "rb") as f:
-                st.download_button("📥 Download Excel File", f, file_name=file_name)
         else:
             st.info("No matching supplier emails found.")
-
-
-if __name__ == '__main__':
-    main()
