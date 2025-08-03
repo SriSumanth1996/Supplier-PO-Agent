@@ -16,6 +16,7 @@ import pytz
 import re
 import streamlit as st
 from streamlit.logger import get_logger
+from urllib.parse import urlparse, parse_qs
 
 # Set up logging
 logger = get_logger(__name__)
@@ -688,54 +689,196 @@ Thank you for introducing your company and sharing your offerings with us."""
     else:
         return ""
 
-def display_email_data(email_address, final_classification, quotation_data, meeting_details=None):
-    st.subheader(f"Email from: {email_address}")
+def get_meeting_status(meeting_details, meeting_result):
+    """Get formatted meeting status for display"""
+    if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
+        return "No Meeting Requested"
     
-    # Classification badge
-    if final_classification == "Quotation Received":
-        st.success(f"Classification: {final_classification}")
-    elif final_classification == "Quotation Partially Received":
-        st.warning(f"Classification: {final_classification}")
-    elif final_classification == "New Business Connection":
-        st.info(f"Classification: {final_classification}")
-    else:
-        st.error(f"Classification: {final_classification}")
-
-    if meeting_details and meeting_details.get("meeting_intent") == "Yes":
-        st.subheader("Meeting Details")
-        st.write(f"Meeting Requested: Yes")
-        if meeting_details.get("proposed_datetime") != "Not specified":
-            try:
-                proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
-                formatted_date = proposed_dt.strftime("%B %d, %Y")
-                formatted_time = proposed_dt.strftime("%I:%M %p")
-                st.write(f"Proposed Time: {formatted_date} at {formatted_time}")
-            except:
-                st.write("Proposed Time: Not specified")
+    if meeting_result:
+        status = meeting_result[1]
+        if status == "scheduled":
+            return "✅ Meeting Scheduled"
+        elif status == "conflict":
+            return "❌ Schedule Conflict"
+        elif status == "outside_business_hours":
+            return "❌ Outside Business Hours"
+        elif status == "past_time":
+            return "❌ Time Already Passed"
+        elif status == "no_specific_time":
+            return "⚠️ No Specific Time"
+        elif status == "incomplete_details":
+            return "⚠️ Incomplete Details"
+        elif status == "parse_error":
+            return "❌ Time Parse Error"
         else:
-            st.write("Proposed Time: Not specified")
+            return "❌ Error Occurred"
+    else:
+        return "⚠️ Meeting Requested"
 
-    # Sender information
-    st.subheader("Sender Information")
-    col1, col2 = st.columns(2)
+def create_quotation_received_table(emails):
+    """Create DataFrame for Quotation Received emails"""
+    if not emails:
+        return pd.DataFrame()
+    
+    data = []
+    for email in emails:
+        qd = email['quotation_data']
+        data.append({
+            'Sender Name': qd.get('sender_name', 'Not present'),
+            'Company': qd.get('company_name', 'Not present'),
+            'Email': email['email_address'],
+            'Product': qd.get('product', 'Not present'),
+            'Quantity': qd.get('quantity', 'Not present'),
+            'Unit Price': qd.get('unit_price', 'Not present'),
+            'Total Cost': qd.get('total_cost', 'Not present'),
+            'Lead Time': qd.get('lead_time', 'Not present'),
+            'Location': qd.get('place', 'Not present'),
+            'Contact': qd.get('contact_number', 'Not present'),
+            'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
+        })
+    
+    return pd.DataFrame(data)
+
+def create_quotation_partial_table(emails):
+    """Create DataFrame for Quotation Partially Received emails"""
+    if not emails:
+        return pd.DataFrame()
+    
+    data = []
+    for email in emails:
+        qd = email['quotation_data']
+        # Identify missing fields
+        missing_fields = []
+        if qd.get('product', 'Not present') == 'Not present':
+            missing_fields.append('Product')
+        if qd.get('quantity', 'Not present') == 'Not present':
+            missing_fields.append('Quantity')
+        if qd.get('unit_price', 'Not present') == 'Not present':
+            missing_fields.append('Unit Price')
+        if qd.get('lead_time', 'Not present') == 'Not present':
+            missing_fields.append('Lead Time')
+        
+        data.append({
+            'Sender Name': qd.get('sender_name', 'Not present'),
+            'Company': qd.get('company_name', 'Not present'),
+            'Email': email['email_address'],
+            'Product': qd.get('product', 'Not present'),
+            'Quantity': qd.get('quantity', 'Not present'),
+            'Unit Price': qd.get('unit_price', 'Not present'),
+            'Total Cost': qd.get('total_cost', 'Not present'),
+            'Lead Time': qd.get('lead_time', 'Not present'),
+            'Location': qd.get('place', 'Not present'),
+            'Contact': qd.get('contact_number', 'Not present'),
+            'Missing Fields': ', '.join(missing_fields) if missing_fields else 'None',
+            'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
+        })
+    
+    return pd.DataFrame(data)
+
+def create_business_connection_table(emails):
+    """Create DataFrame for New Business Connection emails"""
+    if not emails:
+        return pd.DataFrame()
+    
+    data = []
+    for email in emails:
+        qd = email['quotation_data']
+        data.append({
+            'Sender Name': qd.get('sender_name', 'Not present'),
+            'Company': qd.get('company_name', 'Not present'),
+            'Email': email['email_address'],
+            'Designation': qd.get('designation', 'Not present'),
+            'Location': qd.get('place', 'Not present'),
+            'Contact': qd.get('contact_number', 'Not present'),
+            'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
+        })
+    
+    return pd.DataFrame(data)
+
+def display_classification_tables(processed_emails):
+    """Display emails organized by classification in tables"""
+    if not processed_emails:
+        st.warning("No emails processed yet.")
+        return
+
+    # Separate emails by classification
+    quotation_received = [e for e in processed_emails if e['final_classification'] == 'Quotation Received']
+    quotation_partial = [e for e in processed_emails if e['final_classification'] == 'Quotation Partially Received']
+    business_connection = [e for e in processed_emails if e['final_classification'] == 'New Business Connection']
+    unknown = [e for e in processed_emails if e['final_classification'] == 'Unknown']
+
+    # Display summary statistics
+    st.header("📊 Email Processing Summary")
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.write(f"**Name:** {quotation_data.get('sender_name', 'Not present')}")
-        st.write(f"**Designation:** {quotation_data.get('designation', 'Not present')}")
+        st.metric("Complete Quotations", len(quotation_received))
     with col2:
-        st.write(f"**Company:** {quotation_data.get('company_name', 'Not present')}")
-        st.write(f"**Contact:** {quotation_data.get('contact_number', 'Not present')}")
-    st.write(f"**Location:** {quotation_data.get('place', 'Not present')}")
+        st.metric("Partial Quotations", len(quotation_partial))
+    with col3:
+        st.metric("Business Connections", len(business_connection))
+    with col4:
+        st.metric("Unknown/Other", len(unknown))
 
-    if final_classification in ["Quotation Received", "Quotation Partially Received"]:
-        st.subheader("Quotation Details")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write(f"**Product:** {quotation_data.get('product', 'Not present')}")
-            st.write(f"**Quantity:** {quotation_data.get('quantity', 'Not present')}")
-        with col2:
-            st.write(f"**Unit Price:** {quotation_data.get('unit_price', 'Not present')}")
-            st.write(f"**Total Cost:** {quotation_data.get('total_cost', 'Not present')}")
-        st.write(f"**Lead Time:** {quotation_data.get('lead_time', 'Not present')}")
+    # Display Quotation Received table
+    if quotation_received:
+        st.header("✅ Complete Quotations Received")
+        df_complete = create_quotation_received_table(quotation_received)
+        st.dataframe(df_complete, use_container_width=True)
+        
+        # Export option
+        csv_complete = df_complete.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Complete Quotations CSV",
+            data=csv_complete,
+            file_name=f"complete_quotations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.header("✅ Complete Quotations Received")
+        st.info("No complete quotations found in the processed emails.")
+
+    # Display Quotation Partially Received table
+    if quotation_partial:
+        st.header("⚠️ Partial Quotations Received")
+        df_partial = create_quotation_partial_table(quotation_partial)
+        st.dataframe(df_partial, use_container_width=True)
+        
+        # Export option
+        csv_partial = df_partial.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Partial Quotations CSV",
+            data=csv_partial,
+            file_name=f"partial_quotations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.header("⚠️ Partial Quotations Received")
+        st.info("No partial quotations found in the processed emails.")
+
+    # Display New Business Connection table
+    if business_connection:
+        st.header("🤝 New Business Connections")
+        df_business = create_business_connection_table(business_connection)
+        st.dataframe(df_business, use_container_width=True)
+        
+        # Export option
+        csv_business = df_business.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Business Connections CSV", 
+            data=csv_business,
+            file_name=f"business_connections_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.header("🤝 New Business Connections")
+        st.info("No new business connection emails found in the processed emails.")
+
+    # Display Unknown/Other emails if any
+    if unknown:
+        st.header("❓ Unknown/Other Classifications")
+        st.warning(f"Found {len(unknown)} emails that could not be properly classified:")
+        for email in unknown:
+            st.write(f"- {email['email_address']}: {email['subject']}")
 
 def process_emails(gmail_service, calendar_service, num_emails=5):
     results = gmail_service.users().messages().list(
@@ -750,7 +893,14 @@ def process_emails(gmail_service, calendar_service, num_emails=5):
 
     processed_emails = []
     
-    for message in messages[:num_emails]:
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i, message in enumerate(messages[:num_emails]):
+        progress = (i + 1) / num_emails
+        progress_bar.progress(progress)
+        status_text.text(f'Processing email {i + 1} of {num_emails}...')
+        
         msg = gmail_service.users().messages().get(userId='me', id=message['id']).execute()
         headers = msg['payload']['headers']
         sender = [h['value'] for h in headers if h['name'] == 'From'][0]
@@ -817,18 +967,21 @@ def process_emails(gmail_service, calendar_service, num_emails=5):
             "thread_id": thread_id
         })
 
+    progress_bar.progress(1.0)
+    status_text.text('Processing complete!')
+    
     return processed_emails
 
 def main():
     st.set_page_config(page_title="Supplier Quotation Processor", layout="wide")
-    st.title("Supplier Quotation Processing System")
+    st.title("📧 Supplier Quotation Processing System")
     st.markdown("""
     This application processes supplier emails, extracts quotation details, classifies them, 
     and can automatically respond or schedule meetings.
     """)
 
     # Authentication section
-    st.sidebar.header("Authentication")
+    st.sidebar.header("🔐 Authentication")
     if not st.session_state.authenticated:
         if st.sidebar.button("Authenticate with Google"):
             with st.spinner("Authenticating..."):
@@ -839,28 +992,35 @@ def main():
                         st.session_state.calendar_service = calendar_service
                         st.session_state.authenticated = True
                         st.sidebar.success("Authentication successful!")
+                        st.rerun()
                     else:
                         st.sidebar.error("Authentication failed. Please try again.")
                 except Exception as e:
                     st.sidebar.error(f"Authentication error: {str(e)}")
     else:
-        st.sidebar.success("Authenticated with Google")
+        st.sidebar.success("✅ Authenticated with Google")
         if st.sidebar.button("Logout"):
             st.session_state.authenticated = False
             st.session_state.gmail_service = None
             st.session_state.calendar_service = None
             st.session_state.processed_emails = []
-            st.experimental_rerun()
+            st.rerun()
 
     if not st.session_state.authenticated:
-        st.warning("Please authenticate with Google to continue.")
+        st.warning("⚠️ Please authenticate with Google to continue.")
         return
 
     # Main processing section
-    st.header("Process Emails")
-    num_emails = st.slider("Number of emails to process", 1, 10, 3)
+    st.header("📨 Process Emails")
     
-    if st.button("Process Latest Emails"):
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        num_emails = st.slider("Number of emails to process", 1, 20, 5)
+    with col2:
+        st.write("")  # Space for alignment
+        process_button = st.button("🔄 Process Latest Emails", type="primary")
+    
+    if process_button:
         with st.spinner("Processing emails..."):
             try:
                 st.session_state.processed_emails = process_emails(
@@ -868,45 +1028,165 @@ def main():
                     st.session_state.calendar_service,
                     num_emails
                 )
+                st.success(f"✅ Successfully processed {len(st.session_state.processed_emails)} emails!")
             except Exception as e:
-                st.error(f"Error processing emails: {str(e)}")
+                st.error(f"❌ Error processing emails: {str(e)}")
 
-    # Display processed emails
+    # Display classification tables
     if st.session_state.processed_emails:
-        st.header("Processed Emails")
-        for i, email_data in enumerate(st.session_state.processed_emails):
-            with st.expander(f"{i+1}. {email_data['subject']} - {email_data['email_address']}"):
-                display_email_data(
-                    email_data['email_address'],
-                    email_data['final_classification'],
-                    email_data['quotation_data'],
-                    email_data['meeting_details']
+        display_classification_tables(st.session_state.processed_emails)
+        
+        # Action buttons section
+        st.header("⚡ Actions")
+        
+        # Bulk reply options
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📤 Send All Replies", type="secondary"):
+                success_count = 0
+                error_count = 0
+                
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                for i, email_data in enumerate(st.session_state.processed_emails):
+                    progress = (i + 1) / len(st.session_state.processed_emails)
+                    progress_bar.progress(progress)
+                    status_text.text(f'Sending reply {i + 1} of {len(st.session_state.processed_emails)}...')
+                    
+                    success, message = send_reply(
+                        st.session_state.gmail_service,
+                        email_data['thread_id'],
+                        email_data['email_address'],
+                        email_data['subject'],
+                        email_data['reply_body']
+                    )
+                    
+                    if success:
+                        success_count += 1
+                    else:
+                        error_count += 1
+                
+                progress_bar.progress(1.0)
+                status_text.text('Bulk reply complete!')
+                
+                if success_count > 0:
+                    st.success(f"✅ Successfully sent {success_count} replies!")
+                if error_count > 0:
+                    st.error(f"❌ Failed to send {error_count} replies.")
+        
+        with col2:
+            # Export all data
+            if st.button("📥 Export All Data", type="secondary"):
+                all_data = []
+                for email in st.session_state.processed_emails:
+                    qd = email['quotation_data']
+                    row = {
+                        'Classification': email['final_classification'],
+                        'Sender Name': qd.get('sender_name', 'Not present'),
+                        'Company': qd.get('company_name', 'Not present'),
+                        'Email': email['email_address'],
+                        'Subject': email['subject'],
+                        'Product': qd.get('product', 'Not present'),
+                        'Quantity': qd.get('quantity', 'Not present'),
+                        'Unit Price': qd.get('unit_price', 'Not present'),
+                        'Total Cost': qd.get('total_cost', 'Not present'),
+                        'Lead Time': qd.get('lead_time', 'Not present'),
+                        'Location': qd.get('place', 'Not present'),
+                        'Contact': qd.get('contact_number', 'Not present'),
+                        'Designation': qd.get('designation', 'Not present'),
+                        'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
+                    }
+                    all_data.append(row)
+                
+                df_all = pd.DataFrame(all_data)
+                csv_all = df_all.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Complete Dataset",
+                    data=csv_all,
+                    file_name=f"all_processed_emails_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
                 )
+        
+        with col3:
+            if st.button("🔄 Clear Data", type="secondary"):
+                st.session_state.processed_emails = []
+                st.success("✅ Data cleared!")
+                st.rerun()
 
-                # Show reply and actions
-                st.subheader("Proposed Reply")
-                st.text_area("Reply Content", email_data['reply_body'], height=200, key=f"reply_{i}")
-
-                col1, col2 = st.columns(2)
+        # Individual email details (expandable)
+        with st.expander("📋 View Individual Email Details"):
+            for i, email_data in enumerate(st.session_state.processed_emails):
+                st.subheader(f"Email {i+1}: {email_data['subject']}")
+                
+                                col1, col2 = st.columns([2, 1])
                 with col1:
-                    if st.button(f"Send Reply to {email_data['email_address']}", key=f"send_{i}"):
-                        with st.spinner("Sending reply..."):
-                            success, message = send_reply(
-                                st.session_state.gmail_service,
-                                email_data['thread_id'],
-                                email_data['email_address'],
-                                email_data['subject'],
-                                email_data['reply_body']
-                            )
-                            if success:
-                                st.success(message)
-                            else:
-                                st.error(message)
+                    st.write(f"**From:** {email_data['email_address']}")
+                    st.write(f"**Classification:** {email_data['final_classification']}")
+                    
+                    # Display quotation data in a table
+                    st.markdown("**Extracted Information:**")
+                    quotation_df = pd.DataFrame.from_dict(email_data['quotation_data'], orient='index', columns=['Value'])
+                    st.table(quotation_df)
+                
                 with col2:
-                    if email_data['meeting_result'] and email_data['meeting_result'][0]:
-                        st.info(f"Meeting scheduled: {email_data['meeting_result'][1]}")
-                    elif email_data['meeting_details'] and email_data['meeting_details'].get('meeting_intent') == 'Yes':
-                        st.warning(f"Meeting not scheduled: {email_data['meeting_result'][1] if email_data['meeting_result'] else 'No time specified'}")
+                    # Meeting details
+                    st.markdown("**Meeting Details:**")
+                    if email_data.get('meeting_details'):
+                        meeting_details = email_data['meeting_details']
+                        if meeting_details.get('meeting_intent') == "Yes":
+                            st.write("✅ Meeting requested")
+                            if meeting_details.get('proposed_datetime') != "Not specified":
+                                try:
+                                    proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
+                                    formatted_date = proposed_dt.strftime("%B %d, %Y")
+                                    formatted_time = proposed_dt.strftime("%I:%M %p")
+                                    st.write(f"Proposed time: {formatted_date} at {formatted_time}")
+                                except:
+                                    st.write("Proposed time: Could not parse")
+                        else:
+                            st.write("No meeting requested")
+                    else:
+                        st.write("No meeting details")
+                    
+                    # Meeting result
+                    if email_data.get('meeting_result'):
+                        meeting_result = email_data['meeting_result']
+                        if meeting_result[1] == "scheduled":
+                            st.success("✅ Meeting scheduled")
+                        elif meeting_result[1] == "conflict":
+                            st.error("❌ Scheduling conflict")
+                        elif meeting_result[1] == "outside_business_hours":
+                            st.warning("⚠️ Outside business hours")
+                        elif meeting_result[1] == "past_time":
+                            st.error("❌ Proposed time has passed")
+                        elif meeting_result[1] == "no_specific_time":
+                            st.warning("⚠️ No specific time provided")
+                        elif meeting_result[1] == "incomplete_details":
+                            st.warning("⚠️ Incomplete meeting details")
+                        elif meeting_result[1] == "parse_error":
+                            st.error("❌ Could not parse meeting time")
+                
+                # Display reply content
+                st.markdown("**Generated Reply:**")
+                st.text_area("Reply content", email_data['reply_body'], height=200, key=f"reply_{i}")
+                
+                # Individual reply button
+                if st.button(f"✉️ Send Reply to {email_data['email_address']}", key=f"send_{i}"):
+                    success, message = send_reply(
+                        st.session_state.gmail_service,
+                        email_data['thread_id'],
+                        email_data['email_address'],
+                        email_data['subject'],
+                        email_data['reply_body']
+                    )
+                    if success:
+                        st.success(f"✅ Reply sent to {email_data['email_address']}")
+                    else:
+                        st.error(f"❌ Failed to send reply: {message}")
+                
+                st.divider()
 
 if __name__ == '__main__':
     main()
