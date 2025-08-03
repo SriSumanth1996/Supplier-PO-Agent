@@ -6,3 +6,4 @@ groq
 pandas
 html2text
 openpyxl
+openai
