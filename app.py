@@ -1120,7 +1120,7 @@ def main():
             for i, email_data in enumerate(st.session_state.processed_emails):
                 st.subheader(f"Email {i+1}: {email_data['subject']}")
                 
-                                col1, col2 = st.columns([2, 1])
+                col1, col2 = st.columns([2, 1])
                 with col1:
                     st.write(f"**From:** {email_data['email_address']}")
                     st.write(f"**Classification:** {email_data['final_classification']}")
