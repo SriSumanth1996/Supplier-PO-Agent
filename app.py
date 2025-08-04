@@ -171,7 +171,7 @@ def ask_openai(question, context):
     3. UNIT PRICE:
        - Extract ONLY the price per single unit/item as a clean number with currency
        - Look for currency symbols ($, €, ₹, etc.) and amounts
-       - Return ONLY the price (e.g., "₹180" or "$25.50" - NO descriptive text)
+       - Return ONLY the price (e.g., "₹180" or "$25.50" - NO descriptive text like Dollars, Rupees, INR, Euros etc.)
        - Look for terms like: "unit price", "per piece", "each", "price per unit"
        - If you need to calculate unit price from total and quantity, do the math and return only the result
        - NEVER return explanatory text, only the price value
