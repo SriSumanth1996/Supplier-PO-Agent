@@ -186,11 +186,11 @@ def ask_openai(question, context):
        - Convert to days if given in weeks/months (e.g., "2 weeks" = "14 days")
        - Return format e.g., "7 days", "10-15 days", "21 days"
     6. SUPPLIER PLACE/LOCATION:
-       - Look for supplier's city, state, or location in email signature
+       - Look for supplier's city, state, or location in email signature (e.g., "Mumbai", "Kolkata"). Return only that value.
     7. SENDER NAME:
-       - Extract personal name from email signature (e.g., "Rakshan")
+       - Extract personal name from email signature (e.g., "Rakshan"). Return only that value.
     8. COMPANY NAME:
-       - Extract company or organization name from signature (e.g., "TamilNadu Bearing Industries Ltd.")
+       - Extract company or organization name from signature (e.g., "TamilNadu Bearing Industries Ltd."). Return only that value.
     9. CONTACT NUMBER:
        - Extract phone number (e.g., "+91 7661598752")
     10. DESIGNATION:
