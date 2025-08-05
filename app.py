@@ -208,10 +208,12 @@ def authenticate_gmail_and_calendar():
 
 def get_email_body(msg_payload):
     body = ""
+
     if 'parts' in msg_payload:
         for part in msg_payload['parts']:
             mime_type = part.get("mimeType")
             body_data = part.get("body", {}).get("data")
+
             if mime_type == "text/plain" and body_data:
                 body = base64.urlsafe_b64decode(body_data).decode('utf-8')
                 break
@@ -219,14 +221,20 @@ def get_email_body(msg_payload):
                 html_body = base64.urlsafe_b64decode(body_data).decode('utf-8')
                 body = html2text.html2text(html_body)
                 break
-            elifSupport for nested parts
+            elif 'parts' in part:  # Support for nested parts
                 body = get_email_body(part)
                 if body:
                     break
     else:
+        # If no 'parts' field exists, handle the single-part email
+        mime_type = msg_payload.get("mimeType")
         body_data = msg_payload.get("body", {}).get("data")
-        if body_data:
+        if mime_type == "text/plain" and body_data:
             body = base64.urlsafe_b64decode(body_data).decode('utf-8')
+        elif mime_type == "text/html" and body_data:
+            html_body = base64.urlsafe_b64decode(body_data).decode('utf-8')
+            body = html2text.html2text(html_body)
+
     return body
 
 def ask_openai(question, context):
