@@ -809,7 +809,7 @@ def schedule_meetings_for_emails(calendar_service, emails, selected_meetings):
                 email_data['final_classification'],
                 email_data['quotation_data'],
                 email_data['quotation_data'].get('sender_name'),
-                email_data['meeting_details'],
+                email_data.get('meeting_details'),
                 email_data['meeting_result'],
                 "Yes"
             )
@@ -821,7 +821,7 @@ def schedule_meetings_for_emails(calendar_service, emails, selected_meetings):
                 email_data['final_classification'],
                 email_data['quotation_data'],
                 email_data['quotation_data'].get('sender_name'),
-                email_data['meeting_details'],
+                email_data.get('meeting_details'),
                 email_data['meeting_result'],
                 "Yes"
             )
@@ -903,9 +903,8 @@ def display_classification_tables(processed_emails):
         if quotation_received:
             df_complete = create_quotation_received_table(quotation_received)
             df_complete = df_complete.applymap(lambda x: str(x) if not pd.isna(x) else "")
-            df_complete['Meeting'] = df_complete.apply(
-                lambda row: None if row['Meeting Status'] != "Meeting Requested" else row['Meeting'], axis=1
-            )
+            # Precompute whether the Meeting column should be enabled
+            df_complete['Meeting_Enabled'] = df_complete['Meeting Status'] == "Meeting Requested"
 
             st.write("Select emails to send replies or schedule meetings:")
             col1, col2 = st.columns([1, 1])
@@ -920,32 +919,39 @@ def display_classification_tables(processed_emails):
                         lambda row: "Yes" if row['Meeting Status'] == "Meeting Requested" else None, axis=1
                     )
 
+            # Define column config with dynamic disabled state
+            column_config = {
+                "Reply": st.column_config.CheckboxColumn(
+                    "Reply",
+                    help="Select to send reply",
+                    default=False
+                ),
+                "Meeting": st.column_config.SelectboxColumn(
+                    "Meeting",
+                    help="Respond to meeting request",
+                    options=["Yes", "No", None],
+                    default=None
+                ),
+                "Meeting_Enabled": None  # Hide this column
+            }
+
             edited_df = st.data_editor(
                 df_complete,
-                column_config={
-                    "Reply": st.column_config.CheckboxColumn(
-                        "Reply",
-                        help="Select to send reply",
-                        default=False
-                    ),
-                    "Meeting": st.column_config.SelectboxColumn(
-                        "Meeting",
-                        help="Respond to meeting request",
-                        options=["Yes", "No", None],
-                        default=None,
-                        disabled=df_complete['Meeting Status'] != "Meeting Requested"
-                    )
-                },
+                column_config=column_config,
+                disabled=["Meeting_Enabled"],
                 hide_index=True,
-                key="complete_quotations_editor"
+                key="complete_quotations_editor",
+                num_rows="dynamic",
+                column_order=[col for col in df_complete.columns if col != "Meeting_Enabled"]
             )
 
+            # Update session state based on edited DataFrame
             for i, row in edited_df.iterrows():
                 email = row['Email']
                 st.session_state.selected_replies_complete[email] = row['Reply']
-                st.session_state.selected_meetings_complete[email] = row['Meeting']
+                st.session_state.selected_meetings_complete[email] = row['Meeting'] if row['Meeting_Enabled'] else None
 
-            csv_complete = df_complete.drop(columns=['Reply', 'Meeting']).to_csv(index=False)
+            csv_complete = df_complete.drop(columns=['Reply', 'Meeting', 'Meeting_Enabled']).to_csv(index=False)
             st.download_button(
                 label="Download Complete Quotations CSV",
                 data=csv_complete,
@@ -982,9 +988,7 @@ def display_classification_tables(processed_emails):
         if quotation_partial:
             df_partial = create_quotation_partial_table(quotation_partial)
             df_partial = df_partial.applymap(lambda x: str(x) if not pd.isna(x) else "")
-            df_partial['Meeting'] = df_partial.apply(
-                lambda row: None if row['Meeting Status'] != "Meeting Requested" else row['Meeting'], axis=1
-            )
+            df_partial['Meeting_Enabled'] = df_partial['Meeting Status'] == "Meeting Requested"
 
             st.write("Select emails to send replies or schedule meetings:")
             col1, col2 = st.columns([1, 1])
@@ -999,32 +1003,37 @@ def display_classification_tables(processed_emails):
                         lambda row: "Yes" if row['Meeting Status'] == "Meeting Requested" else None, axis=1
                     )
 
+            column_config = {
+                "Reply": st.column_config.CheckboxColumn(
+                    "Reply",
+                    help="Select to send reply",
+                    default=False
+                ),
+                "Meeting": st.column_config.SelectboxColumn(
+                    "Meeting",
+                    help="Respond to meeting request",
+                    options=["Yes", "No", None],
+                    default=None
+                ),
+                "Meeting_Enabled": None
+            }
+
             edited_df_partial = st.data_editor(
                 df_partial,
-                column_config={
-                    "Reply": st.column_config.CheckboxColumn(
-                        "Reply",
-                        help="Select to send reply",
-                        default=False
-                    ),
-                    "Meeting": st.column_config.SelectboxColumn(
-                        "Meeting",
-                        help="Respond to meeting request",
-                        options=["Yes", "No", None],
-                        default=None,
-                        disabled=df_partial['Meeting Status'] != "Meeting Requested"
-                    )
-                },
+                column_config=column_config,
+                disabled=["Meeting_Enabled"],
                 hide_index=True,
-                key="partial_quotations_editor"
+                key="partial_quotations_editor",
+                num_rows="dynamic",
+                column_order=[col for col in df_partial.columns if col != "Meeting_Enabled"]
             )
 
             for i, row in edited_df_partial.iterrows():
                 email = row['Email']
                 st.session_state.selected_replies_partial[email] = row['Reply']
-                st.session_state.selected_meetings_partial[email] = row['Meeting']
+                st.session_state.selected_meetings_partial[email] = row['Meeting'] if row['Meeting_Enabled'] else None
 
-            csv_partial = df_partial.drop(columns=['Reply', 'Meeting']).to_csv(index=False)
+            csv_partial = df_partial.drop(columns=['Reply', 'Meeting', 'Meeting_Enabled']).to_csv(index=False)
             st.download_button(
                 label="Download Partial Quotations CSV",
                 data=csv_partial,
@@ -1062,9 +1071,7 @@ def display_classification_tables(processed_emails):
         if business_connection:
             df_business = create_business_connection_table(business_connection)
             df_business = df_business.applymap(lambda x: str(x) if not pd.isna(x) else "")
-            df_business['Meeting'] = df_business.apply(
-                lambda row: None if row['Meeting Status'] != "Meeting Requested" else row['Meeting'], axis=1
-            )
+            df_business['Meeting_Enabled'] = df_business['Meeting Status'] == "Meeting Requested"
 
             st.write("Select emails to send replies or schedule meetings:")
             col1, col2 = st.columns([1, 1])
@@ -1079,32 +1086,37 @@ def display_classification_tables(processed_emails):
                         lambda row: "Yes" if row['Meeting Status'] == "Meeting Requested" else None, axis=1
                     )
 
+            column_config = {
+                "Reply": st.column_config.CheckboxColumn(
+                    "Reply",
+                    help="Select to send reply",
+                    default=False
+                ),
+                "Meeting": st.column_config.SelectboxColumn(
+                    "Meeting",
+                    help="Respond to meeting request",
+                    options=["Yes", "No", None],
+                    default=None
+                ),
+                "Meeting_Enabled": None
+            }
+
             edited_df_business = st.data_editor(
                 df_business,
-                column_config={
-                    "Reply": st.column_config.CheckboxColumn(
-                        "Reply",
-                        help="Select to send reply",
-                        default=False
-                    ),
-                    "Meeting": st.column_config.SelectboxColumn(
-                        "Meeting",
-                        help="Respond to meeting request",
-                        options=["Yes", "No", None],
-                        default=None,
-                        disabled=df_business['Meeting Status'] != "Meeting Requested"
-                    )
-                },
+                column_config=column_config,
+                disabled=["Meeting_Enabled"],
                 hide_index=True,
-                key="business_connections_editor"
+                key="business_connections_editor",
+                num_rows="dynamic",
+                column_order=[col for col in df_business.columns if col != "Meeting_Enabled"]
             )
 
             for i, row in edited_df_business.iterrows():
                 email = row['Email']
                 st.session_state.selected_replies_business[email] = row['Reply']
-                st.session_state.selected_meetings_business[email] = row['Meeting']
+                st.session_state.selected_meetings_business[email] = row['Meeting'] if row['Meeting_Enabled'] else None
 
-            csv_business = df_business.drop(columns=['Reply', 'Meeting']).to_csv(index=False)
+            csv_business = df_business.drop(columns=['Reply', 'Meeting', 'Meeting_Enabled']).to_csv(index=False)
             st.download_button(
                 label="Download Business Connections CSV",
                 data=csv_business,
