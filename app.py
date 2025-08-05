@@ -175,7 +175,7 @@ def authenticate_gmail_and_calendar():
         2. You'll be redirected to a localhost URL that won't work
         3. Copy the entire URL from your browser's address bar
          patrimony4. Paste it below
-        """
+        """)
         code_url = st.text_input("Paste the redirect URL here:")
         if code_url:
             try:
