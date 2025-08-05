@@ -461,27 +461,32 @@ def send_reply(service, thread_id, to_email, subject, body):
     except Exception as e:
         return False, f"Error sending reply: {e}"
 
+
 def check_calendar_conflict(calendar_service, start_time, end_time):
     try:
-        events_result = calendar_service.events events().list(
+        events_result = calendar_service.events().list(
             calendarId='primary',
             timeMin=start_time.isoformat(),
             timeMax=end_time.isoformat(),
             singleEvents=True,
             orderBy='startTime'
         ).execute()
+
         events = events_result.get('items', [])
         for event in events:
             event_start = datetime.fromisoformat(
                 event['start'].get('dateTime', event['start'].get('date')).replace('Z', '+00:00'))
             event_end = datetime.fromisoformat(
                 event['end'].get('dateTime', event['end'].get('date')).replace('Z', '+00:00'))
+
             if not (end_time <= event_start or start_time >= event_end):
                 return True, event.get('summary', 'Existing meeting')
+
         return False, None
     except Exception as e:
         print(f"Error checking calendar conflict: {e}")
         return False, None
+
 
 def schedule_meeting(calendar_service, quotation_data, email_address, proposed_datetime=None, classification="Unknown"):
     try:
