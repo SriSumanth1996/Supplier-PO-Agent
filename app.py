@@ -3,7 +3,6 @@ import os.path
 import base64
 import email
 import pandas as pd
-import html2text
 from openai import OpenAI
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -17,6 +16,9 @@ import re
 import streamlit as st
 from streamlit.logger import get_logger
 from urllib.parse import urlparse, parse_qs
+import json
+import html2text
+import uuid
 
 logger = get_logger(__name__)
 
@@ -58,6 +60,87 @@ if 'calendar_service' not in st.session_state:
     st.session_state.calendar_service = None
 if 'processed_emails' not in st.session_state:
     st.session_state.processed_emails = []
+if 'chat_messages' not in st.session_state:
+    st.session_state.chat_messages = [
+        {"role": "assistant",
+         "content": "Ask me about supplier quotes or email details, e.g.:\n- 'Are there any partial quotes?'\n- 'Show details for SKF 6205 quotes'\n- 'What are the latest quotes under $10?'"}
+    ]
+
+
+def chatbot_response(prompt):
+    st.sidebar.header("🔍 Supplier Quotation Assistant")
+
+    # Display chat history
+    for msg in st.session_state.chat_messages:
+        st.sidebar.chat_message(msg["role"]).write(msg["content"])
+
+    # Handle user input
+    if prompt:
+        st.session_state.chat_messages.append({"role": "user", "content": prompt})
+        st.sidebar.chat_message("user").write(prompt)
+
+        with st.sidebar.chat_message("assistant"):
+            with st.spinner("Analyzing..."):
+                try:
+                    response = generate_response(prompt, st.session_state.processed_emails)
+                    st.write(response)
+                    st.session_state.chat_messages.append({"role": "assistant", "content": response})
+                except Exception as e:
+                    response = f"Error: {str(e)}"
+                    st.write(response)
+                    st.session_state.chat_messages.append({"role": "assistant", "content": response})
+
+
+def generate_response(query, processed_emails):
+    """Generates a concise and precise response based on the query and processed emails"""
+    # Prepare context from processed emails
+    email_context = []
+    for email in processed_emails:
+        qd = email['quotation_data']
+        email_summary = {
+            "email_address": email['email_address'],
+            "subject": email['subject'],
+            "classification": email['final_classification'],
+            "product": qd.get('product', 'Not present'),
+            "quantity": qd.get('quantity', 'Not present'),
+            "unit_price": qd.get('unit_price', 'Not present'),
+            "total_cost": qd.get('total_cost', 'Not present'),
+            "lead_time": qd.get('lead_time', 'Not present'),
+            "sender_name": qd.get('sender_name', 'Not present'),
+            "company_name": qd.get('company_name', 'Not present'),
+            "place": qd.get('place', 'Not present'),
+            "contact_number": qd.get('contact_number', 'Not present'),
+            "designation": qd.get('designation', 'Not present'),
+            "meeting_status": get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
+        }
+        email_context.append(email_summary)
+
+    # Construct prompt for OpenAI
+    prompt = f"""
+    You are a supplier quotation assistant. Answer the user's query concisely and precisely based on the processed email data.
+    USER QUERY: "{query}"
+    PROCESSED EMAILS: {json.dumps(email_context, indent=2)}
+    GUIDELINES:
+    - Provide a direct, concise response (max 100 words).
+    - Focus on the query's intent (e.g., partial quotes, specific products, price ranges).
+    - If the query asks about partial quotes, list emails classified as "Quotation Partially Received" with missing fields.
+    - If specific products or price ranges are mentioned, summarize relevant email data.
+    - If no relevant data is found, state so clearly.
+    - Do not use a product catalog; rely only on email data.
+    - Avoid technical jargon unless requested.
+    RESPONSE:
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=150
+        )
+        return response.choices[0].message.content.strip() or "No relevant information found."
+    except Exception as e:
+        return f"Error processing query: {str(e)}"
+
 
 def authenticate_gmail_and_calendar():
     creds = None
@@ -77,7 +160,7 @@ def authenticate_gmail_and_calendar():
             return gmail_service, calendar_service
         except Exception as e:
             st.warning(f"Could not refresh token: {e}")
-    
+
     flow = InstalledAppFlow.from_client_config(
         {
             "installed": {
@@ -90,7 +173,7 @@ def authenticate_gmail_and_calendar():
         },
         SCOPES
     )
-    
+
     if not st.runtime.exists():
         auth_url, _ = flow.authorization_url(prompt='consent')
         st.markdown(f"""
@@ -99,7 +182,7 @@ def authenticate_gmail_and_calendar():
         3. Copy the entire URL from your browser's address bar
         4. Paste it below
         """)
-        
+
         code_url = st.text_input("Paste the redirect URL here:")
         if code_url:
             try:
@@ -121,7 +204,7 @@ def authenticate_gmail_and_calendar():
                 st.error(f"Authentication failed: {e}")
                 return None, None
         return None, None
-    
+
     try:
         creds = flow.run_local_server(port=0)
         gmail_service = build('gmail', 'v1', credentials=creds)
@@ -130,6 +213,7 @@ def authenticate_gmail_and_calendar():
     except Exception as e:
         st.error(f"Authentication failed: {e}")
         return None, None
+
 
 def get_email_body(msg_payload):
     body = ""
@@ -153,6 +237,7 @@ def get_email_body(msg_payload):
         if body_data:
             body = base64.urlsafe_b64decode(body_data).decode('utf-8')
     return body
+
 
 def ask_openai(question, context):
     prompt = f"""
@@ -201,7 +286,8 @@ def ask_openai(question, context):
     - If not found, respond with "Not present"
     - Keep original format for non-price fields
     - Don't assume or guess, only state exact extracted values
-    ANSWER:"""
+    ANSWER:
+    """
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -212,6 +298,7 @@ def ask_openai(question, context):
         return response.choices[0].message.content.strip() or "Not present"
     except Exception as e:
         return f"Error: {str(e)}"
+
 
 def classify_email_intent(context):
     prompt = f"""
@@ -240,7 +327,8 @@ def classify_email_intent(context):
     - Focus on the PRIMARY intent of the email
     - Be specific and choose only ONE category
     - Meeting requests should be detected separately (not as a classification)
-    RESPOND WITH ONLY THE CLASSIFICATION CATEGORY NAME (exactly as written above):"""
+    RESPOND WITH ONLY THE CLASSIFICATION CATEGORY NAME (exactly as written above):
+    """
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -255,6 +343,7 @@ def classify_email_intent(context):
         return classification
     except Exception as e:
         return "Unknown"
+
 
 def extract_meeting_details(context):
     ist = pytz.timezone('Asia/Kolkata')
@@ -301,6 +390,7 @@ def extract_meeting_details(context):
             "proposed_datetime": "Not specified"
         }
 
+
 def extract_quotation_data(context, classification):
     if classification in ["New Business Connection", "Unknown"]:
         business_qa_mapping = {
@@ -313,6 +403,7 @@ def extract_quotation_data(context, classification):
         return {key: ask_openai(question, context) for question, key in business_qa_mapping.items()}
     else:
         return {key: ask_openai(question, context) for question, key in qa_mapping.items()}
+
 
 def get_final_classification(quotation_data, initial_classification):
     if initial_classification in ["New Business Connection", "Unknown"]:
@@ -330,6 +421,7 @@ def get_final_classification(quotation_data, initial_classification):
     else:
         return "Quotation Received"
 
+
 def calculate_unit_price_if_missing(quotation_data):
     unit_cost = quotation_data.get("unit_price", "Not present")
     total_cost = quotation_data.get("total_cost", "Not present")
@@ -346,6 +438,7 @@ def calculate_unit_price_if_missing(quotation_data):
             pass
     return quotation_data
 
+
 def calculate_total_cost_if_missing(quotation_data):
     unit_cost = quotation_data.get("unit_price", "Not present")
     total_cost = quotation_data.get("total_cost", "Not present")
@@ -361,6 +454,7 @@ def calculate_total_cost_if_missing(quotation_data):
             quotation_data["total_cost"] = "Calculation failed"
     return quotation_data
 
+
 def send_reply(service, thread_id, to_email, subject, body):
     message = MIMEText(body)
     message['to'] = to_email
@@ -375,6 +469,7 @@ def send_reply(service, thread_id, to_email, subject, body):
         return True, f"Reply sent to {to_email}"
     except Exception as e:
         return False, f"Error sending reply: {e}"
+
 
 def check_calendar_conflict(calendar_service, start_time, end_time):
     try:
@@ -397,6 +492,7 @@ def check_calendar_conflict(calendar_service, start_time, end_time):
     except Exception as e:
         print(f"Error checking calendar conflict: {e}")
         return False, None
+
 
 def schedule_meeting(calendar_service, quotation_data, email_address, proposed_datetime=None, classification="Unknown"):
     try:
@@ -465,6 +561,7 @@ def schedule_meeting(calendar_service, quotation_data, email_address, proposed_d
     except Exception as e:
         print(f"Error scheduling meeting: {e}")
         return None, "error"
+
 
 def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None):
     if classification == "Quotation Received":
@@ -621,6 +718,7 @@ Thank you for introducing your company and sharing your offerings with us."""
     else:
         return ""
 
+
 def get_meeting_status(meeting_details, meeting_result):
     if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
         return "No Meeting Requested"
@@ -645,6 +743,7 @@ def get_meeting_status(meeting_details, meeting_result):
     else:
         return "Meeting Requested"
 
+
 def create_quotation_received_table(emails):
     if not emails:
         return pd.DataFrame()
@@ -655,7 +754,9 @@ def create_quotation_received_table(emails):
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
             'Email': email['email_address'],
-            'Product': qd.get('product', 'Not present').split(':')[-1].strip() if ':' in qd.get('product', 'Not present') else qd.get('product', 'Not present'),
+            'Product': qd.get('product', 'Not present').split(':')[-1].strip() if ':' in qd.get('product',
+                                                                                                'Not present') else qd.get(
+                'product', 'Not present'),
             'Quantity': qd.get('quantity', 'Not present'),
             'Unit Price': qd.get('unit_price', 'Not present'),
             'Total Cost': qd.get('total_cost', 'Not present'),
@@ -665,6 +766,7 @@ def create_quotation_received_table(emails):
             'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
         })
     return pd.DataFrame(data)
+
 
 def create_quotation_partial_table(emails):
     if not emails:
@@ -685,7 +787,9 @@ def create_quotation_partial_table(emails):
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
             'Email': email['email_address'],
-            'Product': qd.get('product', 'Not present').split(':')[-1].strip() if ':' in qd.get('product', 'Not present') else qd.get('product', 'Not present'),
+            'Product': qd.get('product', 'Not present').split(':')[-1].strip() if ':' in qd.get('product',
+                                                                                                'Not present') else qd.get(
+                'product', 'Not present'),
             'Quantity': qd.get('quantity', 'Not present'),
             'Unit Price': qd.get('unit_price', 'Not present'),
             'Total Cost': qd.get('total_cost', 'Not present'),
@@ -696,6 +800,7 @@ def create_quotation_partial_table(emails):
             'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
         })
     return pd.DataFrame(data)
+
 
 def create_business_connection_table(emails):
     if not emails:
@@ -713,6 +818,7 @@ def create_business_connection_table(emails):
             'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
         })
     return pd.DataFrame(data)
+
 
 def send_replies_for_emails(service, emails):
     success_count = 0
@@ -741,6 +847,7 @@ def send_replies_for_emails(service, emails):
     if error_count > 0:
         st.error(f"Failed to send {error_count} replies.")
 
+
 def display_classification_tables(processed_emails):
     if not processed_emails:
         st.warning("No emails processed yet.")
@@ -750,7 +857,7 @@ def display_classification_tables(processed_emails):
     business_connection = [e for e in processed_emails if e['final_classification'] == 'New Business Connection']
     unknown = [e for e in processed_emails if e['final_classification'] == 'Unknown']
     tabs = st.sidebar.radio("Select View", ["Quotations", "New Business Connections"])
-    
+
     if tabs == "Quotations":
         st.header("Complete Quotations Received")
         if quotation_received:
@@ -767,7 +874,7 @@ def display_classification_tables(processed_emails):
                 send_replies_for_emails(st.session_state.gmail_service, quotation_received)
         else:
             st.info("No complete quotations found in the processed emails.")
-        
+
         st.header("Partial Quotations Received")
         if quotation_partial:
             df_partial = create_quotation_partial_table(quotation_partial)
@@ -783,7 +890,7 @@ def display_classification_tables(processed_emails):
                 send_replies_for_emails(st.session_state.gmail_service, quotation_partial)
         else:
             st.info("No partial quotations found in the processed emails.")
-    
+
     elif tabs == "New Business Connections":
         st.header("New Business Connections")
         if business_connection:
@@ -791,7 +898,7 @@ def display_classification_tables(processed_emails):
             st.dataframe(df_business, use_container_width=True)
             csv_business = df_business.to_csv(index=False)
             st.download_button(
-                label="Download Business Connections CSV", 
+                label="Download Business Connections CSV",
                 data=csv_business,
                 file_name=f"business_connections_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
@@ -800,12 +907,13 @@ def display_classification_tables(processed_emails):
                 send_replies_for_emails(st.session_state.gmail_service, business_connection)
         else:
             st.info("No new business connection emails found in the processed emails.")
-    
+
     if unknown:
         st.header("Unknown/Other Classifications")
         st.warning(f"Found {len(unknown)} emails that could not be properly classified:")
         for email in unknown:
             st.write(f"- {email['email_address']}: {email['subject']}")
+
 
 def process_emails(gmail_service, calendar_service, num_emails=5):
     results = gmail_service.users().messages().list(
@@ -881,11 +989,13 @@ def process_emails(gmail_service, calendar_service, num_emails=5):
     status_text.text('Processing complete!')
     return processed_emails
 
+
 def main():
     st.set_page_config(page_title="Supplier Quotation Processor", layout="wide")
     st.title("Supplier Quotation Processing System")
-    st.markdown("This application processes supplier emails, extracts quotation details, classifies them, and can automatically respond or schedule meetings.")
-    
+    st.markdown(
+        "This application processes supplier emails, extracts quotation details, classifies them, and responds to queries concisely.")
+
     st.sidebar.header("Authentication")
     if not st.session_state.authenticated:
         if st.sidebar.button("Authenticate with Google"):
@@ -909,12 +1019,17 @@ def main():
             st.session_state.gmail_service = None
             st.session_state.calendar_service = None
             st.session_state.processed_emails = []
+            st.session_state.chat_messages = []
             st.rerun()
-    
+
+    # Add chatbot to sidebar
+    prompt = st.sidebar.chat_input("Ask about supplier quotes or email details...")
+    chatbot_response(prompt)
+
     if not st.session_state.authenticated:
         st.warning("Please authenticate with Google to continue.")
         return
-    
+
     st.header("Process Emails")
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -922,7 +1037,7 @@ def main():
     with col2:
         st.write("")
         process_button = st.button("Process Latest Emails", type="primary")
-    
+
     if process_button:
         with st.spinner("Processing emails..."):
             try:
@@ -934,9 +1049,10 @@ def main():
                 st.success(f"Successfully processed {len(st.session_state.processed_emails)} emails!")
             except Exception as e:
                 st.error(f"Error processing emails: {str(e)}")
-    
+
     if st.session_state.processed_emails:
         display_classification_tables(st.session_state.processed_emails)
-    
+
+
 if __name__ == '__main__':
     main()
