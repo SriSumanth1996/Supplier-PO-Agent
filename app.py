@@ -282,8 +282,9 @@ def ask_openai(question, context):
        - Extract sender's designation or job title (e.g., "Sales Manager") of the person who is sending the mail
     RESPONSE RULES:
     - Extract ONLY explicitly stated info.
+    - These responses are fed into a tabular format. So, just return what is asked for.
     - Do not hallucinate or take from the examples given above in this prompt
-    - If not found, respond with "Not present"
+    - If not found, respond with "Not present".
     - Keep original format for non-price fields
     - Don't assume or guess, only state exact extracted values
     ANSWER:
