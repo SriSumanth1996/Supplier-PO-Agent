@@ -73,6 +73,10 @@ if 'selected_replies_partial' not in st.session_state:
     st.session_state.selected_replies_partial = {}
 if 'selected_meetings_partial' not in st.session_state:
     st.session_state.selected_meetings_partial = {}
+if 'selected_replies_business' not in st.session_state:
+    st.session_state.selected_replies_business = {}
+if 'selected_meetings_business' not in st.session_state:
+    st.session_state.selected_meetings_business = {}
 
 def chatbot_response(prompt):
     st.sidebar.header("🔍 Supplier Quotation Assistant")
@@ -174,7 +178,7 @@ def authenticate_gmail_and_calendar():
         1. Click [this link]({auth_url}) to authorize
         2. You'll be redirected to a localhost URL that won't work
         3. Copy the entire URL from your browser's address bar
-         patrimony4. Paste it below
+        4. Paste it below
         """)
         code_url = st.text_input("Paste the redirect URL here:")
         if code_url:
@@ -208,12 +212,10 @@ def authenticate_gmail_and_calendar():
 
 def get_email_body(msg_payload):
     body = ""
-
     if 'parts' in msg_payload:
         for part in msg_payload['parts']:
             mime_type = part.get("mimeType")
             body_data = part.get("body", {}).get("data")
-
             if mime_type == "text/plain" and body_data:
                 body = base64.urlsafe_b64decode(body_data).decode('utf-8')
                 break
@@ -221,12 +223,11 @@ def get_email_body(msg_payload):
                 html_body = base64.urlsafe_b64decode(body_data).decode('utf-8')
                 body = html2text.html2text(html_body)
                 break
-            elif 'parts' in part:  # Support for nested parts
+            elif 'parts' in part:
                 body = get_email_body(part)
                 if body:
                     break
     else:
-        # If no 'parts' field exists, handle the single-part email
         mime_type = msg_payload.get("mimeType")
         body_data = msg_payload.get("body", {}).get("data")
         if mime_type == "text/plain" and body_data:
@@ -234,7 +235,6 @@ def get_email_body(msg_payload):
         elif mime_type == "text/html" and body_data:
             html_body = base64.urlsafe_b64decode(body_data).decode('utf-8')
             body = html2text.html2text(html_body)
-
     return body
 
 def ask_openai(question, context):
@@ -317,7 +317,7 @@ def classify_email_intent(context):
        - Lead time or delivery information
     3. "Quotation Partially Received" - If the email contains quotation elements but is missing ANY of these:
        - Product details OR
-       - Unit price OR  
+       - Unit price OR
        - Quantities OR
        - Lead time
     CLASSIFICATION RULES:
@@ -359,7 +359,7 @@ def extract_meeting_details(context):
        - Use the provided current datetime to resolve relative references.
     3. If no date or time is found, respond with "Not specified".
     Output format:
-    Meeting Intent: Yes/No  
+    Meeting Intent: Yes/No
     Proposed Datetime: <ISO 8601 timestamp> or Not specified
     """
     try:
@@ -470,17 +470,14 @@ def check_calendar_conflict(calendar_service, start_time, end_time):
             singleEvents=True,
             orderBy='startTime'
         ).execute()
-
         events = events_result.get('items', [])
         for event in events:
             event_start = datetime.fromisoformat(
                 event['start'].get('dateTime', event['start'].get('date')).replace('Z', '+00:00'))
             event_end = datetime.fromisoformat(
                 event['end'].get('dateTime', event['end'].get('date')).replace('Z', '+00:00'))
-
             if not (end_time <= event_start or start_time >= event_end):
                 return True, event.get('summary', 'Existing meeting')
-
         return False, None
     except Exception as e:
         print(f"Error checking calendar conflict: {e}")
@@ -669,6 +666,7 @@ def create_quotation_received_table(emails):
     data = []
     for email in emails:
         qd = email['quotation_data']
+        meeting_intent = get_meeting_status(email.get('meeting_details'), email.get('meeting_result')) != "No Meeting Requested"
         data.append({
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
@@ -682,7 +680,7 @@ def create_quotation_received_table(emails):
             'Contact': qd.get('contact_number', 'Not present'),
             'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result')),
             'Reply': False,
-            'Meeting': None
+            'Meeting': None if not meeting_intent else 'Yes'
         })
     return pd.DataFrame(data)
 
@@ -701,13 +699,14 @@ def create_quotation_partial_table(emails):
             missing_fields.append('Unit Price')
         if qd.get('lead_time', 'Not present') == 'Not present':
             missing_fields.append('Lead Time')
+        meeting_intent = get_meeting_status(email.get('meeting_details'), email.get('meeting_result')) != "No Meeting Requested"
         data.append({
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
             'Email': email['email_address'],
             'Product': qd.get('product', 'Not present').split(':')[-1].strip() if ':' in qd.get('product', 'Not present') else qd.get('product', 'Not present'),
             'Quantity': qd.get('quantity', 'Not present'),
-            'Unit Priceflood': qd.get('unit_price', 'Not present'),
+            'Unit Price': qd.get('unit_price', 'Not present'),
             'Total Cost': qd.get('total_cost', 'Not present'),
             'Lead Time': qd.get('lead_time', 'Not present'),
             'Location': qd.get('place', 'Not present'),
@@ -715,7 +714,7 @@ def create_quotation_partial_table(emails):
             'Missing Fields': ', '.join(missing_fields) if missing_fields else 'None',
             'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result')),
             'Reply': False,
-            'Meeting': None
+            'Meeting': None if not meeting_intent else 'Yes'
         })
     return pd.DataFrame(data)
 
@@ -725,6 +724,7 @@ def create_business_connection_table(emails):
     data = []
     for email in emails:
         qd = email['quotation_data']
+        meeting_intent = get_meeting_status(email.get('meeting_details'), email.get('meeting_result')) != "No Meeting Requested"
         data.append({
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
@@ -734,24 +734,24 @@ def create_business_connection_table(emails):
             'Contact': qd.get('contact_number', 'Not present'),
             'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result')),
             'Reply': False,
-            'Meeting': None
+            'Meeting': None if not meeting_intent else 'Yes'
         })
     return pd.DataFrame(data)
 
-def send_replies_for_emails(service, emails, selected_replies, selected_meetings):
+def send_replies_for_emails(service, emails, selected_df):
     success_count = 0
     error_count = 0
     progress_bar = st.progress(0)
     status_text = st.empty()
     selected_emails_list = [
         email for email in emails
-        if selected_replies.get(email['email_address'], False)
+        if selected_df.loc[selected_df['Email'] == email['email_address'], 'Reply'].iloc[0]
     ]
     for i, email_data in enumerate(selected_emails_list):
         progress = (i + 1) / len(selected_emails_list)
         progress_bar.progress(progress)
         status_text.text(f'Sending reply {i + 1} of {len(selected_emails_list)}...')
-        meeting_response = selected_meetings.get(email_data['email_address'], None)
+        meeting_response = selected_df.loc[selected_df['Email'] == email_data['email_address'], 'Meeting'].iloc[0]
         reply_body = get_reply_body(
             email_data['final_classification'],
             email_data['quotation_data'],
@@ -778,12 +778,15 @@ def send_replies_for_emails(service, emails, selected_replies, selected_meetings
     if error_count > 0:
         st.error(f"Failed to send {error_count} replies.")
 
-def schedule_meetings_for_emails(calendar_service, emails, selected_emails):
+def schedule_meetings_for_emails(calendar_service, emails, selected_df):
     success_count = 0
     error_count = 0
     progress_bar = st.progress(0)
     status_text = st.empty()
-    selected_emails_list = [email for email in emails if selected_emails.get(email['email_address'], False)]
+    selected_emails_list = [
+        email for email in emails
+        if selected_df.loc[selected_df['Email'] == email['email_address'], 'Meeting'].iloc[0] == 'Yes'
+    ]
     for i, email_data in enumerate(selected_emails_list):
         progress = (i + 1) / len(selected_emails_list)
         progress_bar.progress(progress)
@@ -807,7 +810,7 @@ def schedule_meetings_for_emails(calendar_service, emails, selected_emails):
                 email_data['final_classification'],
                 email_data['quotation_data'],
                 email_data['quotation_data'].get('sender_name'),
-                email_data['meeting_details'],
+                email_data.get('meeting_details'),
                 email_data['meeting_result'],
                 "Yes"
             )
@@ -895,7 +898,7 @@ def process_emails(gmail_service, calendar_service, num_emails=5):
     status_text.text('Processing complete!')
     return processed_emails
 
-def display_classification_tables(processed_emails):
+def display_classification_tables_with_editor(processed_emails):
     if not processed_emails:
         st.warning("No emails processed yet.")
         return
@@ -904,37 +907,37 @@ def display_classification_tables(processed_emails):
     business_connection = [e for e in processed_emails if e['final_classification'] == 'New Business Connection']
     unknown = [e for e in processed_emails if e['final_classification'] == 'Unknown']
     tabs = st.sidebar.radio("Select View", ["Quotations", "New Business Connections"])
+    
     if tabs == "Quotations":
         st.header("Complete Quotations Received")
         if quotation_received:
             df_complete = create_quotation_received_table(quotation_received)
-            st.write("Select emails to send replies or respond to meeting requests:")
             col1, col2 = st.columns([1, 1])
             with col1:
                 select_all_replies = st.checkbox("Select All Replies (Complete)", key="select_all_replies_complete")
             with col2:
                 select_all_meetings = st.checkbox("Select All Meetings (Complete)", key="select_all_meetings_complete")
-            for i, row in df_complete.iterrows():
-                email = row['Email']
-                meeting_intent = row['Meeting Status'] != "No Meeting Requested"
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    default_reply = select_all_replies or st.session_state.selected_replies_complete.get(email, False)
-                    st.session_state.selected_replies_complete[email] = st.checkbox(
-                        f"Reply to {email}", value=default_reply, key=f"reply_complete_{i}"
-                    )
-                with col2:
-                    if meeting_intent:
-                        default_meeting = select_all_meetings or st.session_state.selected_meetings_complete.get(email, None)
-                        options = ["Yes", "No", None]
-                        st.session_state.selected_meetings_complete[email] = st.selectbox(
-                            f"Meeting for {email}", options, index=options.index(default_meeting) if default_meeting in options else 2,
-                            key=f"meeting_complete_{i}", help="Meeting request detected"
-                        )
-                    else:
-                        st.session_state.selected_meetings_complete[email] = None
-                        st.write("No meeting request")
-            st.dataframe(df_complete.drop(columns=['Reply', 'Meeting']), use_container_width=True)
+            if select_all_replies:
+                df_complete['Reply'] = True
+            if select_all_meetings:
+                df_complete['Meeting'] = df_complete['Meeting'].apply(lambda x: 'Yes' if x is not None else None)
+            column_config = {
+                'Reply': st.column_config.CheckboxColumn("Reply", default=False),
+                'Meeting': st.column_config.SelectboxColumn(
+                    "Meeting",
+                    options=['Yes', 'No', None],
+                    default=None,
+                    disabled=lambda x: df_complete.loc[x, 'Meeting Status'] == "No Meeting Requested"
+                )
+            }
+            edited_df = st.data_editor(
+                df_complete,
+                column_config=column_config,
+                use_container_width=True,
+                hide_index=True
+            )
+            st.session_state.selected_replies_complete = edited_df[['Email', 'Reply']].set_index('Email')['Reply'].to_dict()
+            st.session_state.selected_meetings_complete = edited_df[['Email', 'Meeting']].set_index('Email')['Meeting'].to_dict()
             csv_complete = df_complete.drop(columns=['Reply', 'Meeting']).to_csv(index=False)
             st.download_button(
                 label="Download Complete Quotations CSV",
@@ -942,45 +945,44 @@ def display_classification_tables(processed_emails):
                 file_name=f"complete_quotations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
-            if st.button("Send Replies"):
+            if st.button("Send Replies for Complete Quotations"):
                 send_replies_for_emails(
                     st.session_state.gmail_service,
                     quotation_received,
-                    st.session_state.selected_replies_complete,
-                    st.session_state.selected_meetings_complete
+                    edited_df
                 )
         else:
             st.info("No complete quotations found in the processed emails.")
+        
         st.header("Partial Quotations Received")
         if quotation_partial:
             df_partial = create_quotation_partial_table(quotation_partial)
-            st.write("Select emails to send replies or respond to meeting requests:")
             col1, col2 = st.columns([1, 1])
             with col1:
                 select_all_replies = st.checkbox("Select All Replies (Partial)", key="select_all_replies_partial")
             with col2:
                 select_all_meetings = st.checkbox("Select All Meetings (Partial)", key="select_all_meetings_partial")
-            for i, row in df_partial.iterrows():
-                email = row['Email']
-                meeting_intent = row['Meeting Status'] != "No Meeting Requested"
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    default_reply = select_all_replies or st.session_state.selected_replies_partial.get(email, False)
-                    st.session_state.selected_replies_partial[email] = st.checkbox(
-                        f"Reply to {email}", value=default_reply, key=f"reply_partial_{i}"
-                    )
-                with col2:
-                    if meeting_intent:
-                        default_meeting = select_all_meetings or st.session_state.selected_meetings_partial.get(email, None)
-                        options = ["Yes", "No", None]
-                        st.session_state.selected_meetings_partial[email] = st.selectbox(
-                            f"Meeting for {email}", options, index=options.index(default_meeting) if default_meeting in options else 2,
-                            key=f"meeting_partial_{i}", help="Meeting request detected"
-                        )
-                    else:
-                        st.session_state.selected_meetings_partial[email] = None
-                        st.write("No meeting request")
-            st.dataframe(df_partial.drop(columns=['Reply', 'Meeting']), use_container_width=True)
+            if select_all_replies:
+                df_partial['Reply'] = True
+            if select_all_meetings:
+                df_partial['Meeting'] = df_partial['Meeting'].apply(lambda x: 'Yes' if x is not None else None)
+            column_config = {
+                'Reply': st.column_config.CheckboxColumn("Reply", default=False),
+                'Meeting': st.column_config.SelectboxColumn(
+                    "Meeting",
+                    options=['Yes', 'No', None],
+                    default=None,
+                    disabled=lambda x: df_partial.loc[x, 'Meeting Status'] == "No Meeting Requested"
+                )
+            }
+            edited_df = st.data_editor(
+                df_partial,
+                column_config=column_config,
+                use_container_width=True,
+                hide_index=True
+            )
+            st.session_state.selected_replies_partial = edited_df[['Email', 'Reply']].set_index('Email')['Reply'].to_dict()
+            st.session_state.selected_meetings_partial = edited_df[['Email', 'Meeting']].set_index('Email')['Meeting'].to_dict()
             csv_partial = df_partial.drop(columns=['Reply', 'Meeting']).to_csv(index=False)
             st.download_button(
                 label="Download Partial Quotations CSV",
@@ -992,42 +994,41 @@ def display_classification_tables(processed_emails):
                 send_replies_for_emails(
                     st.session_state.gmail_service,
                     quotation_partial,
-                    st.session_state.selected_replies_partial,
-                    st.session_state.selected_meetings_partial
+                    edited_df
                 )
         else:
             st.info("No partial quotations found in the processed emails.")
+    
     elif tabs == "New Business Connections":
         st.header("New Business Connections")
         if business_connection:
             df_business = create_business_connection_table(business_connection)
-            st.write("Select emails to send replies or respond to meeting requests:")
             col1, col2 = st.columns([1, 1])
             with col1:
                 select_all_replies = st.checkbox("Select All Replies (Business)", key="select_all_replies_business")
             with col2:
                 select_all_meetings = st.checkbox("Select All Meetings (Business)", key="select_all_meetings_business")
-            for i, row in df_business.iterrows():
-                email = row['Email']
-                meeting_intent = row['Meeting Status'] != "No Meeting Requested"
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    default_reply = select_all_replies or st.session_state.selected_replies_complete.get(email, False)
-                    st.session_state.selected_replies_complete[email] = st.checkbox(
-                        f"Reply to {email}", value=default_reply, key=f"reply_business_{i}"
-                    )
-                with col2:
-                    if meeting_intent:
-                        default_meeting = select_all_meetings or st.session_state.selected_meetings_complete.get(email, None)
-                        options = ["Yes", "No", None]
-                        st.session_state.selected_meetings_complete[email] = st.selectbox(
-                            f"Meeting for {email}", options, index=options.index(default_meeting) if default_meeting in options else 2,
-                            key=f"meeting_business_{i}", help="Meeting request detected"
-                        )
-                    else:
-                        st.session_state.selected_meetings_complete[email] = None
-                        st.write("No meeting request")
-            st.dataframe(df_business.drop(columns=['Reply', 'Meeting']), use_container_width=True)
+            if select_all_replies:
+                df_business['Reply'] = True
+            if select_all_meetings:
+                df_business['Meeting'] = df_business['Meeting'].apply(lambda x: 'Yes' if x is not None else None)
+            column_config = {
+                'Reply': st.column_config.CheckboxColumn("Reply", default=False),
+                'Meeting': st.column_config.SelectboxColumn(
+                    "Meeting",
+                    options=['Yes', 'No', None],
+                    default=None,
+                    disabled=lambda x: df_business.loc[x, 'Meeting Status'] == "No Meeting Requested"
+                )
+            }
+            edited_df = st.data_editor(
+                df_business,
+                column_config=column_config,
+                use_container_width=True,
+                hide_index=True
+            )
+            st.session_state.selected_replies_business = edited_df[['Email', 'Reply']].set_index('Email')['Reply'].to_dict()
+            st.session_state.selected_meetings_business = edited_df[['Email', 'Meeting']].set_index('Email')['Meeting'].to_dict()
             csv_business = df_business.drop(columns=['Reply', 'Meeting']).to_csv(index=False)
             st.download_button(
                 label="Download Business Connections CSV",
@@ -1035,15 +1036,15 @@ def display_classification_tables(processed_emails):
                 file_name=f"business_connections_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
-            if st.button("Send Replies to New Business Connections"):
+            if st.button("Send Replies for New Business Connections"):
                 send_replies_for_emails(
                     st.session_state.gmail_service,
                     business_connection,
-                    st.session_state.selected_replies_complete,
-                    st.session_state.selected_meetings_complete
+                    edited_df
                 )
         else:
             st.info("No new business connection emails found in the processed emails.")
+    
     if unknown:
         st.header("Unknown/Other Classifications")
         st.warning(f"Found {len(unknown)} emails that could not be properly classified:")
@@ -1083,6 +1084,8 @@ def main():
             st.session_state.selected_meetings_complete = {}
             st.session_state.selected_replies_partial = {}
             st.session_state.selected_meetings_partial = {}
+            st.session_state.selected_replies_business = {}
+            st.session_state.selected_meetings_business = {}
             st.rerun()
     prompt = st.sidebar.chat_input("Ask about supplier quotes or email details...")
     chatbot_response(prompt)
@@ -1108,7 +1111,7 @@ def main():
             except Exception as e:
                 st.error(f"Error processing emails: {str(e)}")
     if st.session_state.processed_emails:
-        display_classification_tables(st.session_state.processed_emails)
+        display_classification_tables_with_editor(st.session_state.processed_emails)
 
 if __name__ == '__main__':
     main()
