@@ -469,22 +469,26 @@ def schedule_meeting(calendar_service, quotation_data, email_address, proposed_d
     try:
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
+
         if proposed_datetime:
             start_hour = proposed_datetime.hour
             if start_hour < 9 or start_hour >= 17:
                 return None, "outside_business_hours"
-            start_time = proposed_datetime
-            end_time = start_time + timedelta(minutes=30)
-            if start_time < now:
+
+            if proposed_datetime < now:
                 return None, "past_time"
-            has_conflict, conflicting_event = check_calendar_conflict(calendar_service, start_time, end_time)
+
+            end_time = proposed_datetime + timedelta(minutes=30)
+            has_conflict, conflicting_event = check_calendar_conflict(calendar_service, proposed_datetime, end_time)
             if has_conflict:
                 return None, "conflict"
         else:
             return None, "no_specific_time"
+
         company_name = quotation_data.get('company_name', 'Unknown Company')
         if company_name == "Not present":
             company_name = "Unknown Company"
+
         if classification == "New Business Connection":
             description = f"""
             Meeting to discuss potential business collaboration with {company_name}.
@@ -504,11 +508,12 @@ def schedule_meeting(calendar_service, quotation_data, email_address, proposed_d
             Location: {quotation_data.get('place', 'Not present')}
             Email: {email_address}
             """
+
         event = {
             'summary': f"Supplier Meeting: {company_name}",
             'description': description,
             'start': {
-                'dateTime': start_time.isoformat(),
+                'dateTime': proposed_datetime.isoformat(),
                 'timeZone': 'Asia/Kolkata',
             },
             'end': {
@@ -527,7 +532,9 @@ def schedule_meeting(calendar_service, quotation_data, email_address, proposed_d
                 ],
             },
         }
+
         event = calendar_service.events().insert(calendarId='primary', body=event, sendUpdates='all').execute()
+
         return event, "scheduled"
     except Exception as e:
         print(f"Error scheduling meeting: {e}")
@@ -559,7 +566,6 @@ def parse_new_datetime(instructions):
         return "Not specified"
 
 def get_meeting_date_time(meeting_details):
-    """Extract date and time separately from meeting details"""
     if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
         return "Not Requested", "Not Requested"
     if meeting_details.get("proposed_datetime") == "Not specified":
@@ -574,7 +580,6 @@ def get_meeting_date_time(meeting_details):
 
 def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
     ist = pytz.timezone('Asia/Kolkata')
-    # Base message based on classification
     if classification == "Quotation Received":
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your quotation. We have received the full details regarding your product and pricing."""
@@ -600,10 +605,9 @@ Thank you for introducing your company and sharing your offerings with us."""
     else:
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your email."""
-    # Process instructions if provided
+
     if instructions.strip():
         try:
-            # Use GPT to interpret instructions and generate appropriate meeting text
             prompt = f"""
             You are a professional email assistant. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
             Email Classification: {classification}
@@ -633,8 +637,9 @@ Thank you for your email."""
             meeting_text = f"\n\nAdditional Instructions: {instructions}"
     else:
         meeting_text = ""
+
     base_message += meeting_text
-    # Standard closing based on classification
+
     if classification == "Quotation Received":
         base_message += "\n\nLooking forward to your response.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
     elif classification == "Quotation Partially Received":
@@ -643,6 +648,7 @@ Thank you for your email."""
         base_message += "\n\nWe will keep your information on record and reach out to you when opportunities arise.\n\nWarm regards,\nDr. Saravanan Kesavan\nBITSoM"
     else:
         base_message += "\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
+
     return base_message
 
 def get_meeting_status(meeting_details, meeting_result):
@@ -774,10 +780,8 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         status_text.text(f'Sending reply {i + 1} of {len(selected_emails)}...')
         instructions = getattr(row, 'Instructions')
         meeting_details = email_data.get('meeting_details', {})
-        # Process meeting scheduling if instructions contain time information
         if instructions.strip() and meeting_details.get('meeting_intent') == "Yes":
             try:
-                # Extract datetime from instructions
                 ist = pytz.timezone('Asia/Kolkata')
                 current_time_ist = datetime.now(ist).isoformat()
                 prompt = f"""
@@ -805,7 +809,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                     email_data['meeting_result'] = (event, status)
             except Exception as e:
                 email_data['meeting_result'] = (None, "parse_error")
-        # Generate reply body
         reply_body = get_reply_body(
             email_data['final_classification'],
             email_data['quotation_data'],
@@ -814,7 +817,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             email_data.get('meeting_result'),
             instructions
         )
-        # Send the reply
         success, message = send_reply(
             service,
             email_data['thread_id'],
