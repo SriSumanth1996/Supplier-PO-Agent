@@ -574,7 +574,7 @@ def get_meeting_date_time(meeting_details):
     except:
         return "Not Specified", "Not Specified"
 
-def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, meeting_choice="No", instructions="", modified_meeting_reply=None):
+def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
     ist = pytz.timezone('Asia/Kolkata')
 
     if classification == "Quotation Received":
@@ -585,10 +585,10 @@ Thank you for your quotation. We have received the full details regarding your p
         missing_items = []
         if quotation_data.get("product", "Not present") == "Not present":
             missing_items.append("product details")
-        if quotation_data.get("unit_price", "Not present") == "Not present":
-            missing_items.append("unit price")
         if quotation_data.get("quantity", "Not present") == "Not present":
             missing_items.append("quantity")
+        if quotation_data.get("unit_price", "Not present") == "Not present":
+            missing_items.append("unit price")
         if quotation_data.get("lead_time", "Not present") == "Not present":
             missing_items.append("lead time")
 
@@ -607,36 +607,8 @@ Thank you for introducing your company and sharing your offerings with us."""
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your email."""
 
-    if meeting_details and meeting_details.get("meeting_intent") == "Yes":
-        if meeting_choice == "Yes":
-            try:
-                proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
-                formatted_date = proposed_dt.strftime("%B %d, %Y")
-                formatted_time = proposed_dt.strftime("%I:%M %p")
-                meeting_text = f"\n\nWe agree to meet at the originally requested time on {formatted_date} at {formatted_time}. We have scheduled the meeting and sent you a calendar invitation."
-            except:
-                meeting_text = f"\n\nWe agree to meet at the originally requested time. We have scheduled the meeting and sent you a calendar invitation."
-        elif meeting_choice == "No":
-            meeting_text = f"\n\nThank you for your meeting request. Unfortunately, we are unable to attend a meeting at this time."
-        elif meeting_choice == "Modify":
-            # Use GPT-enhanced reply if available, else fallback
-            fallback_text = (
-                f"Regarding your meeting request, we are unable to meet at the originally proposed time. "
-                f"Can we set up a meeting {instructions}? Please let us know your availability."
-            )
-            meeting_text = f"\n{modified_meeting_reply or fallback_text}"
-
-
-            
-    else:
-        if meeting_choice == "Yes":
-            meeting_text = f"\n\nWe would like to schedule a meeting to discuss this further. Please let us know your availability."
-        elif meeting_choice == "Modify":
-            meeting_text = f"\n\nWe would like to schedule a meeting {instructions}. Please let us know your availability."
-        else:
-            meeting_text = ""
-
-    base_message += meeting_text
+    if instructions:
+        base_message += f"\n\nWe note your instructions: {instructions}."
 
     if classification == "Quotation Received":
         base_message += "\n\nLooking forward to your response.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
@@ -668,6 +640,8 @@ def get_meeting_status(meeting_details, meeting_result):
             return "Incomplete Details"
         elif status == "parse_error":
             return "Time Parse Error"
+        elif status == "attendees_added":
+            return "Attendees Added"
         else:
             return "Error Occurred"
     else:
@@ -695,8 +669,8 @@ def create_quotation_received_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Instructions': '',   # Free-form instructions
-            'Send': False         # Only checkbox
+            'Instructions': '',
+            'Send': False
         })
     return pd.DataFrame(data)
 
@@ -732,12 +706,10 @@ def create_quotation_partial_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No',
             'Instructions': '',
             'Send': False
         })
-    df = pd.DataFrame(data)
-    return df
+    return pd.DataFrame(data)
 
 def create_business_connection_table(emails):
     if not emails:
@@ -757,12 +729,10 @@ def create_business_connection_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No',
             'Instructions': '',
             'Send': False
         })
-    df = pd.DataFrame(data)
-    return df
+    return pd.DataFrame(data)
 
 def send_replies_for_emails(service, calendar_service, emails, df):
     success_count = 0
@@ -784,15 +754,16 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         meeting_details = email_data.get('meeting_details', {})
         classification = email_data['final_classification']
         sender_name = email_data['quotation_data'].get('sender_name', 'Supplier')
+        email_address = email_data['email_address']
+        subject = email_data['subject']
 
         try:
-            # Use GPT-4o to interpret instructions and decide actions
+            # Use GPT-4o to interpret instructions
             prompt = f"""
             You are an intelligent email assistant for supplier communication.
             Analyze the user's instruction and determine the correct actions.
 
             INSTRUCTIONS: "{instructions}"
-
             EMAIL CLASSIFICATION: {classification}
             ORIGINAL MEETING REQUESTED: {meeting_details.get('meeting_intent') == 'Yes'}
             ORIGINAL PROPOSED TIME: {meeting_details.get('proposed_datetime')}
@@ -822,7 +793,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             )
             content = response.choices[0].message.content.strip()
 
-            # Parse GPT output
             def extract_field(text, field):
                 match = re.search(f"{field}:\\s*(.+)", text, re.DOTALL)
                 return match.group(1).strip() if match else ""
@@ -832,12 +802,12 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             attendee_emails_str = extract_field(content, "ATTENDEE_EMAILS")
             custom_reply_text = extract_field(content, "REPLY_TEXT")
 
-            # Default reply if none generated
+            # Default reply if GPT fails to generate one
             if not custom_reply_text:
                 if instructions:
                     custom_reply_text = f"Thank you for your message. We acknowledge your request: {instructions}. We will get back to you shortly."
                 else:
-                    custom_reply_text = "Thank you for your email. We appreciate your communication."
+                    custom_reply_text = get_reply_body(classification, email_data['quotation_data'], sender_name, meeting_details)
 
             # Schedule meeting if datetime is provided
             if proposed_dt_str != "Not specified":
@@ -846,13 +816,12 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                     event, status = schedule_meeting(
                         calendar_service,
                         email_data['quotation_data'],
-                        email_data['email_address'],
+                        email_address,
                         proposed_dt,
                         classification
                     )
                     email_data['meeting_result'] = (event, status)
 
-                    # If scheduled, update reply with calendar info
                     if status == "scheduled":
                         formatted_time = proposed_dt.strftime("%B %d, %Y at %I:%M %p")
                         custom_reply_text = (
@@ -868,7 +837,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                 try:
                     event = email_data['meeting_result'][0]
                     if event:
-                        # Update event with new attendees
                         emails_list = [email.strip() for email in attendee_emails_str.split(",")]
                         existing_attendees = event.get('attendees', [])
                         new_attendees = [{'email': email} for email in emails_list if email not in str(existing_attendees)]
@@ -884,7 +852,7 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                 except Exception as e:
                     pass  # Ignore if update fails
 
-            # Generate final reply body
+            # Final reply body
             reply_body = f"""
 Dear {sender_name},
 
@@ -896,21 +864,14 @@ BITSoM
             """.strip()
 
             # Send the reply
-            success, message = send_reply(
-                service,
-                email_data['thread_id'],
-                email_data['email_address'],
-                email_data['subject'],
-                reply_body
-            )
-
+            success, message = send_reply(service, email_data['thread_id'], email_address, subject, reply_body)
             if success:
                 success_count += 1
             else:
                 error_count += 1
 
         except Exception as e:
-            st.error(f"Error processing instruction for {email_data['email_address']}: {str(e)}")
+            st.error(f"Error processing instruction for {email_address}: {str(e)}")
             error_count += 1
 
     progress_bar.progress(1.0)
@@ -939,12 +900,12 @@ def display_classification_tables(processed_emails):
             edited_df_complete = st.data_editor(
                 df_complete,
                 column_config={
-                "Send": st.column_config.CheckboxColumn("Send", default=False),
-                "Instructions": st.column_config.TextColumn(
-                    "Instructions",
-                    help="Enter any instruction: reschedule meeting, add attendees, custom message, etc."
-                )
-            },
+                    "Send": st.column_config.CheckboxColumn("Send", default=False),
+                    "Instructions": st.column_config.TextColumn(
+                        "Instructions",
+                        help="Enter any instruction: reschedule meeting, add attendees, custom message, etc."
+                    )
+                },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
@@ -968,14 +929,9 @@ def display_classification_tables(processed_emails):
                 df_partial,
                 column_config={
                     "Send": st.column_config.CheckboxColumn("Send", default=False),
-                    "Meeting": st.column_config.SelectboxColumn(
-                        "Meeting",
-                        options=["Yes", "No", "Modify"],
-                        default="No"
-                    ),
                     "Instructions": st.column_config.TextColumn(
                         "Instructions",
-                        help="Only required when Meeting is set to 'Modify'. Specify when you'd like to meet (e.g., 'tomorrow at 2 PM', 'next Monday morning')."
+                        help="Enter any instruction: reschedule meeting, add attendees, custom message, etc."
                     )
                 },
                 use_container_width=True,
@@ -1002,14 +958,9 @@ def display_classification_tables(processed_emails):
                 df_business,
                 column_config={
                     "Send": st.column_config.CheckboxColumn("Send", default=False),
-                    "Meeting": st.column_config.SelectboxColumn(
-                        "Meeting",
-                        options=["Yes", "No", "Modify"],
-                        default="No"
-                    ),
                     "Instructions": st.column_config.TextColumn(
                         "Instructions",
-                        help="Only required when Meeting is set to 'Modify'. Specify when you'd like to meet (e.g., 'tomorrow at 2 PM', 'next Monday morning')."
+                        help="Enter any instruction: reschedule meeting, add attendees, custom message, etc."
                     )
                 },
                 use_container_width=True,
