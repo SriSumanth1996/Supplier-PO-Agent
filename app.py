@@ -534,6 +534,7 @@ def schedule_meeting(calendar_service, quotation_data, email_address, proposed_d
         }
 
         event = calendar_service.events().insert(calendarId='primary', body=event, sendUpdates='all').execute()
+
         return event, "scheduled"
     except Exception as e:
         print(f"Error scheduling meeting: {e}")
@@ -605,67 +606,37 @@ Thank you for introducing your company and sharing your offerings with us."""
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your email."""
 
-    meeting_text = ""
-    alternative_time_proposed = False
-
-    if meeting_details and meeting_details.get("meeting_intent") == "Yes":
-        if meeting_result:
-            status = meeting_result[1]
-
-            if instructions.strip():
-                try:
-                    prompt = f"""
-                    Extract a meeting time from these instructions if present. Return only the time in HH:MM format or 'None'.
-                    Instructions: "{instructions}"
-                    """
-                    response = client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0.3,
-                        max_tokens=50
-                    )
-                    time_str = response.choices[0].message.content.strip()
-
-                    if time_str != "None":
-                        try:
-                            hours, minutes = map(int, time_str.split(':'))
-                            if 9 <= hours < 17:
-                                alternative_time_proposed = True
-                                meeting_text = f"\n\nWe note your proposed meeting time is outside our business hours (9 AM to 5 PM). However, we would be happy to meet at {time_str} as suggested in your instructions. Please confirm if this works for you."
-                                if "vp" in instructions.lower() or "vice president" in instructions.lower():
-                                    meeting_text += "\n\nWe would also appreciate if your Vice President could join this meeting to discuss potential collaboration opportunities."
-                        except:
-                            pass
-                except:
-                    pass
-
-            if not alternative_time_proposed:
-                if status == "outside_business_hours":
-                    meeting_text = "\n\nWe note your proposed meeting time is outside our standard business hours (9 AM to 5 PM, Monday to Friday)."
-                    if "vp" in instructions.lower() or "vice president" in instructions.lower():
-                        meeting_text += "\n\nWe would appreciate if your Vice President could join when we schedule a meeting during business hours."
-                    meeting_text += "\n\nCould you please suggest an alternative time within business hours?"
-
-                elif status == "conflict":
-                    meeting_text = "\n\nWe would like to discuss your proposal, but unfortunately we have a scheduling conflict at your proposed time."
-                    if "vp" in instructions.lower() or "vice president" in instructions.lower():
-                        meeting_text += "\n\nWe would appreciate if your Vice President could join when we reschedule."
-                    meeting_text += "\n\nCould you please suggest an alternative time?"
-
-                elif status == "past_time":
-                    meeting_text = "\n\nWe note that your proposed meeting time has already passed. Could you please suggest an alternative time for our discussion?"
-                    if "vp" in instructions.lower() or "vice president" in instructions.lower():
-                        meeting_text += "\n\nWe would appreciate if your Vice President could join the rescheduled meeting."
-
-                elif status == "scheduled":
-                    meeting_text = "\n\nWe have scheduled a meeting as per your request. You should receive a calendar invitation shortly."
-                    if "vp" in instructions.lower() or "vice president" in instructions.lower():
-                        meeting_text += "\n\nWe would appreciate if your Vice President could join this meeting."
-
-                elif status == "no_specific_time":
-                    meeting_text = "\n\nWe would be happy to schedule a meeting to discuss further. Could you please suggest a specific time during business hours (9 AM to 5 PM, Monday to Friday)?"
-                    if "vp" in instructions.lower() or "vice president" in instructions.lower():
-                        meeting_text += "\n\nWe would appreciate if your Vice President could join the meeting."
+    if instructions.strip():
+        try:
+            prompt = f"""
+            You are a professional email assistant. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
+            Email Classification: {classification}
+            Original Meeting Details: {meeting_details}
+            Instructions from User: "{instructions}"
+            Guidelines:
+            1. If instructions contain a new meeting time:
+               - Politely explain we can't meet at original time (if applicable)
+               - Propose the new time
+               - Mention calendar invite will be sent
+            2. If instructions request someone to join:
+               - Politely request their presence
+               - Explain why if reason is given
+            3. For other instructions:
+               - Incorporate naturally into the email
+            4. Keep tone professional and polite
+            Respond ONLY with the text to be inserted in the email (no headings or markers).
+            """
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=200
+            )
+            meeting_text = "\n\n" + response.choices[0].message.content.strip()
+        except Exception as e:
+            meeting_text = f"\n\nAdditional Instructions: {instructions}"
+    else:
+        meeting_text = ""
 
     base_message += meeting_text
 
