@@ -313,7 +313,6 @@ def classify_email_intent(context):
        - General business development outreach
        - Marketing or promotional content
        - Request for partnership or collaboration
-       - No specific quotation or pricing information provided
     2. "Quotation Received" - If the email contains ALL four essential elements:
        - Product details
        - Clear pricing information (unit price or total cost)
@@ -323,13 +322,12 @@ def classify_email_intent(context):
        - Product details OR
        - Unit price OR  
        - Quantities OR
-       - Lead time OR
-       - Any pairs of them OR
-       - All of the above four
+       - Lead time
     CLASSIFICATION RULES:
     - Focus on the PRIMARY intent of the email
     - Be specific and choose only ONE category
     - Meeting requests should be detected separately (not as a classification)
+    - In "Quotation Partially Received", return "Not Present" for the elements that are missing.
     RESPOND WITH ONLY THE CLASSIFICATION CATEGORY NAME (exactly as written above):
     """
     try:
