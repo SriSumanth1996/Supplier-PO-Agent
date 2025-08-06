@@ -586,7 +586,7 @@ Thank you for your quotation. We have received the full details regarding your p
                         formatted_time = proposed_dt.strftime("%I:%M %p")
                         meeting_text = f"\n\nRegarding your meeting request, we propose an alternative time on {formatted_date} at {formatted_time}. An invitation has been sent; please confirm your availability."
                     except:
-                        meeting_text = f"\n\nRegarding your meeting request, we propose an alternative time as specified in our instructions: {instructions}. Please confirm your availability."
+                        meeting_text = f"\n\nRegarding your meeting request, we propose an alternative arrangement: {instructions}. Please confirm your availability."
                 else:
                     meeting_text = f"\n\nRegarding your meeting request, we propose an alternative arrangement: {instructions}. Please confirm your availability."
             else:
@@ -708,6 +708,7 @@ def create_quotation_received_table(emails):
     data = []
     for email in emails:
         qd = email['quotation_data']
+        meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
         data.append({
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
@@ -719,12 +720,17 @@ def create_quotation_received_table(emails):
             'Lead Time': qd.get('lead_time', 'Not present'),
             'Location': qd.get('place', 'Not present'),
             'Contact': qd.get('contact_number', 'Not present'),
-            'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result')),
+            'Meeting Status': meeting_status,
             'Response': False,
-            'Meeting': 'No' if get_meeting_status(email.get('meeting_details'), email.get('meeting_result')) == "No Meeting Requested" else 'Yes',
-            'Instructions': ''
+            'Meeting': 'No' if meeting_status == "No Meeting Requested" else 'Yes',
+            'Instructions': '',
+            'Meeting_Disabled': meeting_status == "No Meeting Requested",
+            'Instructions_Disabled': meeting_status == "No Meeting Requested" or 'Yes' == 'Yes'  # Will be updated dynamically
         })
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+    # Update Instructions_Disabled based on Meeting column
+    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1)
+    return df
 
 def create_quotation_partial_table(emails):
     if not emails:
@@ -732,6 +738,7 @@ def create_quotation_partial_table(emails):
     data = []
     for email in emails:
         qd = email['quotation_data']
+        meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
         missing_fields = []
         if qd.get('product', 'Not present') == 'Not present':
             missing_fields.append('Product')
@@ -753,12 +760,17 @@ def create_quotation_partial_table(emails):
             'Location': qd.get('place', 'Not present'),
             'Contact': qd.get('contact_number', 'Not present'),
             'Missing Fields': ', '.join(missing_fields) if missing_fields else 'None',
-            'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result')),
+            'Meeting Status': meeting_status,
             'Response': False,
-            'Meeting': 'No' if get_meeting_status(email.get('meeting_details'), email.get('meeting_result')) == "No Meeting Requested" else 'Yes',
-            'Instructions': ''
+            'Meeting': 'No' if meeting_status == "No Meeting Requested" else 'Yes',
+            'Instructions': '',
+            'Meeting_Disabled': meeting_status == "No Meeting Requested",
+            'Instructions_Disabled': meeting_status == "No Meeting Requested" or 'Yes' == 'Yes'  # Will be updated dynamically
         })
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+    # Update Instructions_Disabled based on Meeting column
+    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1)
+    return df
 
 def create_business_connection_table(emails):
     if not emails:
@@ -766,6 +778,7 @@ def create_business_connection_table(emails):
     data = []
     for email in emails:
         qd = email['quotation_data']
+        meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
         data.append({
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
@@ -773,12 +786,17 @@ def create_business_connection_table(emails):
             'Designation': qd.get('designation', 'Not present'),
             'Location': qd.get('place', 'Not present'),
             'Contact': qd.get('contact_number', 'Not present'),
-            'Meeting Status': get_meeting_status(email.get('meeting_details'), email.get('meeting_result')),
+            'Meeting Status': meeting_status,
             'Response': False,
-            'Meeting': 'No' if get_meeting_status(email.get('meeting_details'), email.get('meeting_result')) == "No Meeting Requested" else 'Yes',
-            'Instructions': ''
+            'Meeting': 'No' if meeting_status == "No Meeting Requested" else 'Yes',
+            'Instructions': '',
+            'Meeting_Disabled': meeting_status == "No Meeting Requested",
+            'Instructions_Disabled': meeting_status == "No Meeting Requested" or 'Yes' == 'Yes'  # Will be updated dynamically
         })
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+    # Update Instructions_Disabled based on Meeting column
+    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1)
+    return df
 
 def send_replies_for_emails(service, calendar_service, emails, df):
     success_count = 0
@@ -835,7 +853,7 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         st.success(f"Successfully sent {success_count} replies!")
     if error_count > 0:
         st.error(f"Failed to send {error_count} replies.")
-        
+
 def display_classification_tables(processed_emails):
     if not processed_emails:
         st.warning("No emails processed yet.")
@@ -857,18 +875,24 @@ def display_classification_tables(processed_emails):
                         "Meeting",
                         options=["Yes", "No", "Modify"],
                         default="No",
-                        disabled=lambda x: x["Meeting Status"] == "No Meeting Requested",
+                        disabled="Meeting_Disabled"
                     ),
                     "Instructions": st.column_config.TextColumn(
                         "Instructions",
-                        disabled=lambda x: x["Meeting"] == "Yes",
-                    )
+                        disabled="Instructions_Disabled"
+                    ),
+                    "Meeting_Disabled": None,  # Hide this column
+                    "Instructions_Disabled": None  # Hide this column
                 },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
             )
-            csv_complete = edited_df_complete.to_csv(index=False)
+            # Update Instructions_Disabled based on edited Meeting column
+            edited_df_complete['Instructions_Disabled'] = edited_df_complete.apply(
+                lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1
+            )
+            csv_complete = edited_df_complete.drop(columns=['Meeting_Disabled', 'Instructions_Disabled']).to_csv(index=False)
             st.download_button(
                 label="Download Complete Quotations CSV",
                 data=csv_complete,
@@ -890,18 +914,24 @@ def display_classification_tables(processed_emails):
                         "Meeting",
                         options=["Yes", "No", "Modify"],
                         default="No",
-                        disabled=lambda x: x["Meeting Status"] == "No Meeting Requested",
+                        disabled="Meeting_Disabled"
                     ),
                     "Instructions": st.column_config.TextColumn(
                         "Instructions",
-                        disabled=lambda x: x["Meeting"] == "Yes",
-                    )
+                        disabled="Instructions_Disabled"
+                    ),
+                    "Meeting_Disabled": None,  # Hide this column
+                    "Instructions_Disabled": None  # Hide this column
                 },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
             )
-            csv_partial = edited_df_partial.to_csv(index=False)
+            # Update Instructions_Disabled based on edited Meeting column
+            edited_df_partial['Instructions_Disabled'] = edited_df_partial.apply(
+                lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1
+            )
+            csv_partial = edited_df_partial.drop(columns=['Meeting_Disabled', 'Instructions_Disabled']).to_csv(index=False)
             st.download_button(
                 label="Download Partial Quotations CSV",
                 data=csv_partial,
@@ -924,18 +954,24 @@ def display_classification_tables(processed_emails):
                         "Meeting",
                         options=["Yes", "No", "Modify"],
                         default="No",
-                        disabled=lambda x: x["Meeting Status"] == "No Meeting Requested",
+                        disabled="Meeting_Disabled"
                     ),
                     "Instructions": st.column_config.TextColumn(
                         "Instructions",
-                        disabled=lambda x: x["Meeting"] == "Yes",
-                    )
+                        disabled="Instructions_Disabled"
+                    ),
+                    "Meeting_Disabled": None,  # Hide this column
+                    "Instructions_Disabled": None  # Hide this column
                 },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
             )
-            csv_business = edited_df_business.to_csv(index=False)
+            # Update Instructions_Disabled based on edited Meeting column
+            edited_df_business['Instructions_Disabled'] = edited_df_business.apply(
+                lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1
+            )
+            csv_business = edited_df_business.drop(columns=['Meeting_Disabled', 'Instructions_Disabled']).to_csv(index=False)
             st.download_button(
                 label="Download Business Connections CSV",
                 data=csv_business,
