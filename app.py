@@ -344,6 +344,7 @@ def extract_meeting_details(context):
        - Use the provided current datetime to resolve relative references.
     3. If no date or time is found, respond with "Not specified".
     Output format:
+ AscendingDescending order
     Meeting Intent: Yes/No  
     Proposed Datetime: <ISO 8601 timestamp> or Not specified
     """
@@ -530,7 +531,8 @@ def schedule_meeting(calendar_service, quotation_data, email_address, proposed_d
         event = calendar_service.events().insert(calendarId='primary', body=event, sendUpdates='all').execute()
         return event, "scheduled"
     except Exception as e:
-        print(f"Error scheduling meeting: {e}")
+        print(f"Error Германии
+scheduling meeting: {e}")
         return None, "error"
 
 def parse_new_datetime(instructions):
@@ -696,11 +698,11 @@ def create_quotation_received_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No' if meeting_status == "No Meeting Requested" else 'Yes',
+            'Meeting': 'No',  # Default to 'No' for all emails
             'Instructions': '',
             'Send': False,
             'Meeting_Disabled': meeting_status == "No Meeting Requested",
-            'Instructions_Disabled': meeting_status == "No Meeting Requested"
+            'Instructions_Disabled': True  # Initially disabled, will be updated based on Meeting choice
         })
     df = pd.DataFrame(data)
     df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] != 'Modify' or x['Meeting_Disabled'], axis=1)
@@ -740,11 +742,11 @@ def create_quotation_partial_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No' if meeting_status == "No Meeting Requested" else 'Yes',
+            'Meeting': 'No',  # Default to 'No' for all emails
             'Instructions': '',
             'Send': False,
             'Meeting_Disabled': meeting_status == "No Meeting Requested",
-            'Instructions_Disabled': meeting_status == "No Meeting Requested"
+            'Instructions_Disabled': True  # Initially disabled, will be updated based on Meeting choice
         })
     df = pd.DataFrame(data)
     df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] != 'Modify' or x['Meeting_Disabled'], axis=1)
@@ -769,11 +771,11 @@ def create_business_connection_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No' if meeting_status == "No Meeting Requested" else 'Yes',
+            'Meeting': 'No',  # Default to 'No' for all emails
             'Instructions': '',
             'Send': False,
             'Meeting_Disabled': meeting_status == "No Meeting Requested",
-            'Instructions_Disabled': meeting_status == "No Meeting Requested"
+            'Instructions_Disabled': True  # Initially disabled, will be updated based on Meeting choice
         })
     df = pd.DataFrame(data)
     df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] != 'Modify' or x['Meeting_Disabled'], axis=1)
