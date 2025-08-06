@@ -323,7 +323,9 @@ def classify_email_intent(context):
        - Product details OR
        - Unit price OR  
        - Quantities OR
-       - Lead time
+       - Lead time OR
+       - Any pairs of them OR
+       - All of the above four
     CLASSIFICATION RULES:
     - Focus on the PRIMARY intent of the email
     - Be specific and choose only ONE category
@@ -334,7 +336,7 @@ def classify_email_intent(context):
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
+            temperature=0.3,
             max_tokens=50
         )
         classification = response.choices[0].message.content.strip()
