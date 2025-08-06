@@ -778,18 +778,16 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             4. If no meeting time is specified and no meeting exists, do not schedule a new meeting unless explicitly requested.
             5. If the instruction is unrelated to meetings or attendees, return it as a custom message.
 
-            OUTPUT FORMAT (exact format):
-            MEETING_DATETIME: <ISO 8601> or Not specified
-            ADD_ATTENDEES: Yes/No
-            ATTENDEE_EMAILS: email1@domain.com, email2@domain.com (if any)
-            ATTENDEE_NAMES: Name1, Name2 (if mentioned, else empty)
-            CUSTOM_MESSAGE: The instruction text if unrelated to meetings/attendees, else empty
-            REPLY_TEXT: The full professional reply text to send, including:
-                - Acknowledgment of the original request
-                - Confirmation of any meeting scheduling or attendee addition
-                - Explanation of any issues (e.g., no meeting exists)
-                - The custom message if provided
-                - Always sign off with "Best regards, Dr. Saravanan Kesavan, BITSoM"
+            OUTPUT FORMAT (exact format, one line per field, no markdown, no quotes):
+            MEETING_DATETIME: 2025-08-06T16:00:00+05:30
+            ADD_ATTENDEES: Yes
+            ATTENDEE_EMAILS: vp@bitsom.edu
+            ATTENDEE_NAMES: VP
+            CUSTOM_MESSAGE: 
+            REPLY_TEXT: Thank you for your request. We have scheduled a meeting...
+            - DO NOT include any extra text before or after.
+            - DO NOT wrap values in quotes.
+            - Use only the exact field names listed.
             """
 
             response = client.chat.completions.create(
@@ -801,8 +799,14 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             content = response.choices[0].message.content.strip()
 
             def extract_field(text, field):
-                match = re.search(f"{field}:\\s*(.+)", text, re.DOTALL)
-                return match.group(1).strip() if match else ""
+                pattern = f"{field}:\\s*(.*?)(?:\n[A-Z_]+:|$)"
+                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+                if match:
+                    return match.group(1).strip()
+                for line in text.splitlines():
+                    if line.startswith(f"{field}:"):
+                        return line.split(":", 1)[1].strip()
+                return "Not specified"
 
             proposed_dt_str = extract_field(content, "MEETING_DATETIME")
             add_attendees_str = extract_field(content, "ADD_ATTENDEES")
@@ -811,8 +815,10 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             custom_message = extract_field(content, "CUSTOM_MESSAGE")
             reply_text = extract_field(content, "REPLY_TEXT")
 
-            # Default reply if GPT fails to generate one
-            if not reply_text:
+            # Clean up reply_text
+            if reply_text.startswith("REPLY_TEXT:"):
+                reply_text = reply_text.replace("REPLY_TEXT:", "").strip()
+            if not reply_text or reply_text == "Not specified":
                 reply_text = get_reply_body(classification, email_data['quotation_data'], sender_name, meeting_details)
                 if instructions and not custom_message:
                     custom_message = instructions
@@ -821,7 +827,32 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             meeting_result = email_data.get('meeting_result', (None, None))
             if proposed_dt_str != "Not specified":
                 try:
-                    proposed_dt = datetime.fromisoformat(proposed_dt_str)
+                    # Clean up the datetime string
+                    proposed_dt_str = proposed_dt_str.strip()
+                    if proposed_dt_str == "Not specified":
+                        raise ValueError("No datetime specified")
+
+                    # Fix common formatting issues
+                    if " " in proposed_dt_str and "T" not in proposed_dt_str:
+                        parts = proposed_dt_str.split(" ")
+                        if len(parts) >= 2:
+                            date_part = parts[0]
+                            time_part = parts[1]
+                            tz = parts[2] if len(parts) > 2 else "+05:30"
+                            proposed_dt_str = f"{date_part}T{time_part}{tz}"
+
+                    # Remove extra text like "IST"
+                    proposed_dt_str = re.sub(r"[A-Z]{2,}$", "", proposed_dt_str).strip()
+                    proposed_dt_str = proposed_dt_str.replace("IST", "").strip()
+
+                    try:
+                        proposed_dt = datetime.fromisoformat(proposed_dt_str)
+                    except ValueError as ve:
+                        parsed = parse_new_datetime(proposed_dt_str)
+                        if parsed == "Not specified":
+                            raise ve
+                        proposed_dt = datetime.fromisoformat(parsed)
+
                     event, status = schedule_meeting(
                         calendar_service,
                         email_data['quotation_data'],
