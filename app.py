@@ -954,7 +954,7 @@ def display_classification_tables(processed_emails):
                 column_config={
                     "Send": st.column_config.CheckboxColumn("Send", default=False),
                     "Meeting": st.column_config.SelectboxColumn(
-                        "Your Response",
+                        "Meeting",
                         help="Choose your action: 'Yes' to accept the meeting, 'No' to decline, 'Modify' to suggest a new time.",
                         options=["Yes", "No", "Modify"],
                         default="No"
