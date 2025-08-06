@@ -785,7 +785,7 @@ def send_replies_for_emails(service, calendar_service, emails, df):
     error_count = 0
     progress_bar = st.progress(0)
     status_text = st.empty()
-    for i, (email_data, row) in enumerate(zip(emails, df.itertuples(index=False)):
+    for i, (email_data, row) in enumerate(zip(emails, df.itertuples(index=False))):
         if not getattr(row, 'Response'):
             continue
         progress = (i + 1) / len(emails)
@@ -835,7 +835,7 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         st.success(f"Successfully sent {success_count} replies!")
     if error_count > 0:
         st.error(f"Failed to send {error_count} replies.")
-
+        
 def display_classification_tables(processed_emails):
     if not processed_emails:
         st.warning("No emails processed yet.")
