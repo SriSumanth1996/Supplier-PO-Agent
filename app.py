@@ -687,7 +687,6 @@ def create_quotation_received_table(emails):
         qd = email['quotation_data']
         meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
         meeting_date, meeting_time = get_meeting_date_time(email.get('meeting_details'))
-        
         data.append({
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
@@ -702,12 +701,13 @@ def create_quotation_received_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No',  # Default to 'No' - user can change this
+            'Meeting': 'No',  # User's choice — always starts as 'No'
             'Instructions': '',
             'Send': False
         })
     df = pd.DataFrame(data)
     return df
+
 
 def create_quotation_partial_table(emails):
     if not emails:
@@ -717,7 +717,6 @@ def create_quotation_partial_table(emails):
         qd = email['quotation_data']
         meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
         meeting_date, meeting_time = get_meeting_date_time(email.get('meeting_details'))
-        
         missing_fields = []
         if qd.get('product', 'Not present') == 'Not present':
             missing_fields.append('Product')
@@ -727,7 +726,6 @@ def create_quotation_partial_table(emails):
             missing_fields.append('Unit Price')
         if qd.get('lead_time', 'Not present') == 'Not present':
             missing_fields.append('Lead Time')
-            
         data.append({
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
@@ -743,12 +741,13 @@ def create_quotation_partial_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No',  # Default to 'No' - user can change this
+            'Meeting': 'No',  # User decides — default to 'No'
             'Instructions': '',
             'Send': False
         })
     df = pd.DataFrame(data)
     return df
+
 
 def create_business_connection_table(emails):
     if not emails:
@@ -758,7 +757,6 @@ def create_business_connection_table(emails):
         qd = email['quotation_data']
         meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
         meeting_date, meeting_time = get_meeting_date_time(email.get('meeting_details'))
-        
         data.append({
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
@@ -769,13 +767,14 @@ def create_business_connection_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No',  # Default to 'No' - user can change this
+            'Meeting': 'No',  # User's action — starts as 'No'
             'Instructions': '',
             'Send': False
         })
     df = pd.DataFrame(data)
     return df
 
+    
 def send_replies_for_emails(service, calendar_service, emails, df):
     success_count = 0
     error_count = 0
@@ -876,7 +875,8 @@ def display_classification_tables(processed_emails):
                 column_config={
                     "Send": st.column_config.CheckboxColumn("Send", default=False),
                     "Meeting": st.column_config.SelectboxColumn(
-                        "Meeting",
+                        "Your Response",
+                        help="Choose your action: 'Yes' to accept the meeting, 'No' to decline, 'Modify' to suggest a new time.",
                         options=["Yes", "No", "Modify"],
                         default="No"
                     ),
