@@ -344,7 +344,6 @@ def extract_meeting_details(context):
        - Use the provided current datetime to resolve relative references.
     3. If no date or time is found, respond with "Not specified".
     Output format:
- AscendingDescending order
     Meeting Intent: Yes/No  
     Proposed Datetime: <ISO 8601 timestamp> or Not specified
     """
@@ -531,8 +530,7 @@ def schedule_meeting(calendar_service, quotation_data, email_address, proposed_d
         event = calendar_service.events().insert(calendarId='primary', body=event, sendUpdates='all').execute()
         return event, "scheduled"
     except Exception as e:
-        print(f"Error")
-scheduling meeting: {e}")
+        print(f"Error scheduling meeting: {e}")
         return None, "error"
 
 def parse_new_datetime(instructions):
@@ -634,7 +632,13 @@ Thank you for your email."""
         else:
             meeting_text = ""
     else:
-        meeting_text = ""
+        # Even if no meeting was requested, we can still offer to meet based on user choice
+        if meeting_choice == "Yes":
+            meeting_text = f"\n\nWe would like to schedule a meeting to discuss this further. Please let us know your availability."
+        elif meeting_choice == "Modify":
+            meeting_text = f"\n\nWe would like to schedule a meeting {instructions}. Please let us know your availability."
+        else:
+            meeting_text = ""
 
     # Add meeting text to base message
     base_message += meeting_text
@@ -698,14 +702,11 @@ def create_quotation_received_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No',  # Default to 'No' for all emails
+            'Meeting': 'No',  # Default to 'No' - user can change this
             'Instructions': '',
-            'Send': False,
-            'Meeting_Disabled': meeting_status == "No Meeting Requested",
-            'Instructions_Disabled': True  # Initially disabled, will be updated based on Meeting choice
+            'Send': False
         })
     df = pd.DataFrame(data)
-    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] != 'Modify' or x['Meeting_Disabled'], axis=1)
     return df
 
 def create_quotation_partial_table(emails):
@@ -742,14 +743,11 @@ def create_quotation_partial_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No',  # Default to 'No' for all emails
+            'Meeting': 'No',  # Default to 'No' - user can change this
             'Instructions': '',
-            'Send': False,
-            'Meeting_Disabled': meeting_status == "No Meeting Requested",
-            'Instructions_Disabled': True  # Initially disabled, will be updated based on Meeting choice
+            'Send': False
         })
     df = pd.DataFrame(data)
-    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] != 'Modify' or x['Meeting_Disabled'], axis=1)
     return df
 
 def create_business_connection_table(emails):
@@ -771,14 +769,11 @@ def create_business_connection_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No',  # Default to 'No' for all emails
+            'Meeting': 'No',  # Default to 'No' - user can change this
             'Instructions': '',
-            'Send': False,
-            'Meeting_Disabled': meeting_status == "No Meeting Requested",
-            'Instructions_Disabled': True  # Initially disabled, will be updated based on Meeting choice
+            'Send': False
         })
     df = pd.DataFrame(data)
-    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] != 'Modify' or x['Meeting_Disabled'], axis=1)
     return df
 
 def send_replies_for_emails(service, calendar_service, emails, df):
@@ -814,7 +809,7 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                     email_data['meeting_result'] = (event, status)
                 except:
                     email_data['meeting_result'] = (None, "parse_error")
-        elif meeting_details.get('meeting_intent') == "Yes" and meeting_choice == "Modify":
+        elif meeting_choice == "Modify":
             # Schedule meeting at modified time if datetime is provided in instructions
             new_datetime = parse_new_datetime(instructions)
             if new_datetime != "Not specified":
@@ -883,28 +878,25 @@ def display_classification_tables(processed_emails):
                     "Meeting": st.column_config.SelectboxColumn(
                         "Meeting",
                         options=["Yes", "No", "Modify"],
-                        default="No",
-                        disabled="Meeting_Disabled"
+                        default="No"
                     ),
                     "Instructions": st.column_config.TextColumn(
                         "Instructions",
-                        disabled="Instructions_Disabled"
-                    ),
-                    "Meeting_Disabled": None,
-                    "Instructions_Disabled": None
+                        help="Only required when Meeting is set to 'Modify'. Specify when you'd like to meet (e.g., 'tomorrow at 2 PM', 'next Monday morning')."
+                    )
                 },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
             )
-            csv_complete = edited_df_complete.drop(columns=['Meeting_Disabled', 'Instructions_Disabled']).to_csv(index=False)
+            csv_complete = edited_df_complete.to_csv(index=False)
             st.download_button(
                 label="Download Complete Quotations CSV",
                 data=csv_complete,
                 file_name=f"complete_quotations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
-            if st.button("Send for Selected Complete Quotations"):
+            if st.button("Send Replies for Selected Complete Quotations"):
                 send_replies_for_emails(st.session_state.gmail_service, st.session_state.calendar_service, quotation_received, edited_df_complete)
         else:
             st.info("No complete quotations found in the processed emails.")
@@ -919,28 +911,25 @@ def display_classification_tables(processed_emails):
                     "Meeting": st.column_config.SelectboxColumn(
                         "Meeting",
                         options=["Yes", "No", "Modify"],
-                        default="No",
-                        disabled="Meeting_Disabled"
+                        default="No"
                     ),
                     "Instructions": st.column_config.TextColumn(
                         "Instructions",
-                        disabled="Instructions_Disabled"
-                    ),
-                    "Meeting_Disabled": None,
-                    "Instructions_Disabled": None
+                        help="Only required when Meeting is set to 'Modify'. Specify when you'd like to meet (e.g., 'tomorrow at 2 PM', 'next Monday morning')."
+                    )
                 },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
             )
-            csv_partial = edited_df_partial.drop(columns=['Meeting_Disabled', 'Instructions_Disabled']).to_csv(index=False)
+            csv_partial = edited_df_partial.to_csv(index=False)
             st.download_button(
                 label="Download Partial Quotations CSV",
                 data=csv_partial,
                 file_name=f"partial_quotations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
-            if st.button("Send for Selected Partial Quotations"):
+            if st.button("Send Replies for Selected Partial Quotations"):
                 send_replies_for_emails(st.session_state.gmail_service, st.session_state.calendar_service, quotation_partial, edited_df_partial)
         else:
             st.info("No partial quotations found in the processed emails.")
@@ -956,28 +945,25 @@ def display_classification_tables(processed_emails):
                     "Meeting": st.column_config.SelectboxColumn(
                         "Meeting",
                         options=["Yes", "No", "Modify"],
-                        default="No",
-                        disabled="Meeting_Disabled"
+                        default="No"
                     ),
                     "Instructions": st.column_config.TextColumn(
                         "Instructions",
-                        disabled="Instructions_Disabled"
-                    ),
-                    "Meeting_Disabled": None,
-                    "Instructions_Disabled": None
+                        help="Only required when Meeting is set to 'Modify'. Specify when you'd like to meet (e.g., 'tomorrow at 2 PM', 'next Monday morning')."
+                    )
                 },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
             )
-            csv_business = edited_df_business.drop(columns=['Meeting_Disabled', 'Instructions_Disabled']).to_csv(index=False)
+            csv_business = edited_df_business.to_csv(index=False)
             st.download_button(
                 label="Download Business Connections CSV",
                 data=csv_business,
                 file_name=f"business_connections_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
-            if st.button("Send for Selected Business Connections"):
+            if st.button("Send Replies for Selected Business Connections"):
                 send_replies_for_emails(st.session_state.gmail_service, st.session_state.calendar_service, business_connection, edited_df_business)
         else:
             st.info("No new business connection emails found in the processed emails.")
