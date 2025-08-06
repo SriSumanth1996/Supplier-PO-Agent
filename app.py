@@ -340,7 +340,7 @@ def extract_meeting_details(context):
     2. If yes, infer the proposed date and time, even if partial (e.g., "6th at 4PM", "Monday morning").
        - Convert into a full datetime string in ISO 8601 format (e.g., "2025-08-06T16:00:00+05:30").
        - Assume Indian Standard Time (IST).
-       - If the date (e.g., "6th") has already passed this month, infer the next month.
+       - If the date (e.g., "6th") has already passed this month, infer the next month's same date.
        - Use the provided current datetime to resolve relative references.
     3. If no date or time is found, respond with "Not specified".
     Output format:
