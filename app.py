@@ -783,10 +783,14 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         status_text.text(f'Sending reply {i + 1} of {len(selected_emails)}...')
         instructions = getattr(row, 'Instructions')
         meeting_details = email_data.get('meeting_details', {})
+        # Ensure meeting_result is a tuple with a status
         meeting_result = email_data.get('meeting_result', (None, None))
-        
-        # Check if the original meeting time was outside business hours or not scheduled
-        if meeting_details.get('meeting_intent') == "Yes" and (meeting_result[1] in [None, "outside_business_hours", "no_specific_time"]):
+        # Defensive check to ensure meeting_result is a tuple/list with status
+        if not isinstance(meeting_result, (tuple, list)) or len(meeting_result) < 2:
+            meeting_result = (None, None)
+
+        # Check if the email has a meeting intent and needs scheduling
+        if meeting_details.get('meeting_intent') == "Yes" and meeting_result[1] in (None, "outside_business_hours", "no_specific_time"):
             try:
                 ist = pytz.timezone('Asia/Kolkata')
                 current_time_ist = datetime.now(ist).isoformat()
@@ -814,19 +818,20 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                     )
                     email_data['meeting_result'] = (event, status)
                 elif meeting_result[1] == "outside_business_hours":
-                    # If no new time is provided and original was outside business hours, keep the status
+                    # Retain outside_business_hours status if no new time is provided
                     email_data['meeting_result'] = (None, "outside_business_hours")
                 else:
                     email_data['meeting_result'] = (None, "no_specific_time")
             except Exception as e:
                 email_data['meeting_result'] = (None, "parse_error")
-        
+                st.error(f"Error parsing meeting time: {str(e)}")
+
         reply_body = get_reply_body(
             email_data['final_classification'],
             email_data['quotation_data'],
             email_data['quotation_data'].get('sender_name'),
             meeting_details,
-            email_data.get('meeting_result'),
+            email_data.get('meeting_result', (None, None)),
             instructions
         )
         success, message = send_reply(
