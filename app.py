@@ -685,7 +685,7 @@ def create_quotation_received_table(emails):
             'Sender Name': qd.get('sender_name', 'Not present'),
             'Company': qd.get('company_name', 'Not present'),
             'Email': email['email_address'],
-            'Product': qd.get('product', 'Not present').split(':')[-1].strip() if ':' in qd.get('product', 'Not present') else qd.get('product', 'Not present'),
+            'Product': qd.get('product', 'Not present'),
             'Quantity': qd.get('quantity', 'Not present'),
             'Unit Price': qd.get('unit_price', 'Not present'),
             'Total Cost': qd.get('total_cost', 'Not present'),
@@ -695,12 +695,10 @@ def create_quotation_received_table(emails):
             'Meeting Status': meeting_status,
             'Date of Meeting': meeting_date,
             'Time of Meeting': meeting_time,
-            'Meeting': 'No',
-            'Instructions': '',
-            'Send': False
+            'Instructions': '',   # Free-form instructions
+            'Send': False         # Only checkbox
         })
-    df = pd.DataFrame(data)
-    return df
+    return pd.DataFrame(data)
 
 def create_quotation_partial_table(emails):
     if not emails:
@@ -782,122 +780,142 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         progress_bar.progress(progress)
         status_text.text(f'Sending reply {i + 1} of {len(selected_emails)}...')
 
-        meeting_choice = getattr(row, 'Meeting')
-        instructions = getattr(row, 'Instructions')
+        instructions = getattr(row, 'Instructions', '').strip()
         meeting_details = email_data.get('meeting_details', {})
+        classification = email_data['final_classification']
+        sender_name = email_data['quotation_data'].get('sender_name', 'Supplier')
 
-        if meeting_details.get('meeting_intent') == "Yes":
-            if meeting_choice == "Yes":
-                if meeting_details.get("proposed_datetime") != "Not specified":
-                    try:
-                        proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
-                        event, status = schedule_meeting(
-                            calendar_service,
-                            email_data['quotation_data'],
-                            email_data['email_address'],
-                            proposed_dt,
-                            email_data['final_classification']
-                        )
-                        email_data['meeting_result'] = (event, status)
-                    except:
-                        email_data['meeting_result'] = (None, "parse_error")
+        try:
+            # Use GPT-4o to interpret instructions and decide actions
+            prompt = f"""
+            You are an intelligent email assistant for supplier communication.
+            Analyze the user's instruction and determine the correct actions.
 
-            elif meeting_choice == "Modify":
-                # Use GPT-4o to understand instruction and extract datetime + generate reply
+            INSTRUCTIONS: "{instructions}"
+
+            EMAIL CLASSIFICATION: {classification}
+            ORIGINAL MEETING REQUESTED: {meeting_details.get('meeting_intent') == 'Yes'}
+            ORIGINAL PROPOSED TIME: {meeting_details.get('proposed_datetime')}
+
+            TASK:
+            1. Determine if a new meeting time is proposed (e.g., 'August 10 at 4 PM', 'tomorrow at 11').
+            2. Determine if additional attendees should be added (e.g., 'include our VP', 'invite Dr. Kesavan').
+            3. Determine if a custom message should be included in the reply.
+            4. If no meeting time is specified but a meeting is implied, do not schedule.
+
+            OUTPUT FORMAT (exact format):
+            MEETING_DATETIME: <ISO 8601> or Not specified
+            ADD_ATTENDEES: Yes/No
+            ATTENDEE_EMAILS: email1@domain.com, email2@domain.com (if any)
+            REPLY_TEXT: The full custom reply text to send. Be professional and include:
+                - Acknowledgment of original request
+                - Explanation of changes
+                - Meeting details if scheduled
+                - Any additional info
+            """
+
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=300
+            )
+            content = response.choices[0].message.content.strip()
+
+            # Parse GPT output
+            def extract_field(text, field):
+                match = re.search(f"{field}:\\s*(.+)", text, re.DOTALL)
+                return match.group(1).strip() if match else ""
+
+            proposed_dt_str = extract_field(content, "MEETING_DATETIME")
+            add_attendees_str = extract_field(content, "ADD_ATTENDEES")
+            attendee_emails_str = extract_field(content, "ATTENDEE_EMAILS")
+            custom_reply_text = extract_field(content, "REPLY_TEXT")
+
+            # Default reply if none generated
+            if not custom_reply_text:
+                if instructions:
+                    custom_reply_text = f"Thank you for your message. We acknowledge your request: {instructions}. We will get back to you shortly."
+                else:
+                    custom_reply_text = "Thank you for your email. We appreciate your communication."
+
+            # Schedule meeting if datetime is provided
+            if proposed_dt_str != "Not specified":
                 try:
-                    ist = pytz.timezone('Asia/Kolkata')
-                    current_time_ist = datetime.now(ist).isoformat()
-            
-                    prompt = f"""
-                    You are a professional meeting assistant. Analyze the user's modification request and respond accordingly.
-            
-                    Instructions: "{instructions}"
-                    Current Time (IST): {current_time_ist}
-            
-                    Task:
-                    1. Determine if a valid meeting time is being proposed (e.g., "August 10th at 4 PM", "tomorrow at 11").
-                    2. If yes, convert it to ISO 8601 format in IST.
-                    3. Generate a polite reply explaining:
-                       - We can't meet at the original time
-                       - We propose the new time
-                       - A calendar invite has been sent
-            
-                    If no valid time is found, respond:
-                    DATETIME: Not specified
-                    REPLY: We are unable to meet at the originally proposed time. Please suggest an alternative time.
-            
-                    If valid, respond:
-                    DATETIME: <ISO 8601>
-                    REPLY: Thank you for your meeting request. As we are not available at the originally proposed time, we propose to meet on [formatted date and time] instead. We have scheduled the meeting and sent you a calendar invitation.
-                    """
-            
-                    response = client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0.3,
-                        max_tokens=200
+                    proposed_dt = datetime.fromisoformat(proposed_dt_str)
+                    event, status = schedule_meeting(
+                        calendar_service,
+                        email_data['quotation_data'],
+                        email_data['email_address'],
+                        proposed_dt,
+                        classification
                     )
-                    content = response.choices[0].message.content.strip()
-            
-                    # Parse output
-                    dt_match = re.search(r"DATETIME:\s*(.+)", content)
-                    reply_match = re.search(r"REPLY:\s*(.+)", content, re.DOTALL)
-            
-                    proposed_dt_str = dt_match.group(1).strip() if dt_match else "Not specified"
-                    reply_text = reply_match.group(1).strip() if reply_match else "We are unable to meet at the originally proposed time. Please suggest an alternative time."
-            
-                    # Store GPT-generated reply
-                    email_data['modified_meeting_reply'] = reply_text
-            
-                    # Try to schedule if datetime is valid
-                    if proposed_dt_str != "Not specified":
-                        try:
-                            proposed_dt = datetime.fromisoformat(proposed_dt_str)
-                            event, status = schedule_meeting(
-                                calendar_service,
-                                email_data['quotation_data'],
-                                email_data['email_address'],
-                                proposed_dt,
-                                email_data['final_classification']
-                            )
-                            email_data['meeting_result'] = (event, status)
-                        except Exception as e:
-                            email_data['meeting_result'] = (None, "parse_error")
-                            email_data['modified_meeting_reply'] = "We are unable to process your requested time. Please suggest another."
-                    else:
-                        email_data['meeting_result'] = (None, "no_specific_time")
-            
+                    email_data['meeting_result'] = (event, status)
+
+                    # If scheduled, update reply with calendar info
+                    if status == "scheduled":
+                        formatted_time = proposed_dt.strftime("%B %d, %Y at %I:%M %p")
+                        custom_reply_text = (
+                            f"Thank you for your request. We have scheduled a meeting on {formatted_time} IST. "
+                            "A calendar invite has been sent to you."
+                        )
                 except Exception as e:
-                    email_data['modified_meeting_reply'] = "We are unable to meet at the originally proposed time. Please suggest an alternative time."
-                    email_data['meeting_result'] = (None, "error")
+                    email_data['meeting_result'] = (None, "parse_error")
+                    custom_reply_text = "We could not process your requested meeting time. Please suggest another."
 
-        # Generate reply body
-        reply_body = get_reply_body(
-            email_data['final_classification'],
-            email_data['quotation_data'],
-            email_data['quotation_data'].get('sender_name'),
-            meeting_details,
-            email_data.get('meeting_result'),
-            meeting_choice,
-            instructions,
-            modified_meeting_reply=email_data.get('modified_meeting_reply')
-        )
+            # Add extra attendees if needed
+            if add_attendees_str == "Yes" and attendee_emails_str:
+                try:
+                    event = email_data['meeting_result'][0]
+                    if event:
+                        # Update event with new attendees
+                        emails_list = [email.strip() for email in attendee_emails_str.split(",")]
+                        existing_attendees = event.get('attendees', [])
+                        new_attendees = [{'email': email} for email in emails_list if email not in str(existing_attendees)]
+                        if new_attendees:
+                            event['attendees'].extend(new_attendees)
+                            updated_event = calendar_service.events().update(
+                                calendarId='primary',
+                                eventId=event['id'],
+                                body=event,
+                                sendUpdates='all'
+                            ).execute()
+                            email_data['meeting_result'] = (updated_event, "attendees_added")
+                except Exception as e:
+                    pass  # Ignore if update fails
 
-        success, message = send_reply(
-            service,
-            email_data['thread_id'],
-            email_data['email_address'],
-            email_data['subject'],
-            reply_body
-        )
+            # Generate final reply body
+            reply_body = f"""
+Dear {sender_name},
 
-        if success:
-            success_count += 1
-        else:
+{custom_reply_text}
+
+Best regards,
+Dr. Saravanan Kesavan
+BITSoM
+            """.strip()
+
+            # Send the reply
+            success, message = send_reply(
+                service,
+                email_data['thread_id'],
+                email_data['email_address'],
+                email_data['subject'],
+                reply_body
+            )
+
+            if success:
+                success_count += 1
+            else:
+                error_count += 1
+
+        except Exception as e:
+            st.error(f"Error processing instruction for {email_data['email_address']}: {str(e)}")
             error_count += 1
 
     progress_bar.progress(1.0)
     status_text.text('Bulk reply complete!')
+
     if success_count > 0:
         st.success(f"Successfully sent {success_count} replies!")
     if error_count > 0:
@@ -921,18 +939,12 @@ def display_classification_tables(processed_emails):
             edited_df_complete = st.data_editor(
                 df_complete,
                 column_config={
-                    "Send": st.column_config.CheckboxColumn("Send", default=False),
-                    "Meeting": st.column_config.SelectboxColumn(
-                        "Your Response",
-                        help="Choose your action: 'Yes' to accept the meeting, 'No' to decline, 'Modify' to suggest a new time.",
-                        options=["Yes", "No", "Modify"],
-                        default="No"
-                    ),
-                    "Instructions": st.column_config.TextColumn(
-                        "Instructions",
-                        help="Only required when Meeting is set to 'Modify'. Specify when you'd like to meet (e.g., 'tomorrow at 2 PM', 'next Monday morning')."
-                    )
-                },
+                "Send": st.column_config.CheckboxColumn("Send", default=False),
+                "Instructions": st.column_config.TextColumn(
+                    "Instructions",
+                    help="Enter any instruction: reschedule meeting, add attendees, custom message, etc."
+                )
+            },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
