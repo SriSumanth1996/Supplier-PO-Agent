@@ -331,7 +331,7 @@ def extract_meeting_details(context):
     now_ist = datetime.now(ist)
     current_ist_iso = now_ist.isoformat()
     prompt = f"""
-    You are a meeting scheduling assistant. Read the email below and extract a clear, structured datetime for a proposed meeting.
+    You are an intelligent meeting scheduling assistant. Read the email below and extract a clear, structured datetime for a proposed meeting.
     Email Content:
     {context}
     Current datetime (IST): {current_ist_iso}
@@ -621,7 +621,7 @@ Thank you for your email."""
                - If instructions provide a new valid time, propose that time and mention a calendar invite will be sent.
                - Otherwise, ask the recipient to suggest a time within business hours.
             2. If instructions contain a new meeting time and meeting_result is not 'outside_business_hours':
-               - Politely explain we can't meet at the original time (if applicable).
+               - Politely explain we can't meet at the original time proposed by the supplier and politely check whether they are okay with the new meeting time provided in the instructions.
                - Propose the new time and mention a calendar invite will be sent.
             3. If instructions request someone to join (e.g., VP):
                - Politely request their presence and explain why if a reason is given.
@@ -634,7 +634,7 @@ Thank you for your email."""
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
+                temperature=0.1,
                 max_tokens=200
             )
             meeting_text = "\n\n" + response.choices[0].message.content.strip()
