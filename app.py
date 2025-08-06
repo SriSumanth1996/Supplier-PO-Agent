@@ -574,7 +574,7 @@ def get_meeting_date_time(meeting_details):
     except:
         return "Not Specified", "Not Specified"
 
-def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, meeting_choice="No", instructions=""):
+def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, meeting_choice="No", instructions="", modified_meeting_reply=None):
     ist = pytz.timezone('Asia/Kolkata')
 
     if classification == "Quotation Received":
@@ -619,10 +619,15 @@ Thank you for your email."""
         elif meeting_choice == "No":
             meeting_text = f"\n\nThank you for your meeting request. Unfortunately, we are unable to attend a meeting at this time."
         elif meeting_choice == "Modify":
-            fallback_text = f"We are unable to meet at the originally proposed time. Can we schedule a meeting {instructions}? Please let us know your availability."
-            meeting_text = f"\n{email_data.get('modified_meeting_reply', fallback_text)}"
-        else:
-            meeting_text = ""
+            # Use GPT-enhanced reply if available, else fallback
+            fallback_text = (
+                f"Regarding your meeting request, we are unable to meet at the originally proposed time. "
+                f"Can we set up a meeting {instructions}? Please let us know your availability."
+            )
+            meeting_text = f"\n{modified_meeting_reply or fallback_text}"
+
+
+            
     else:
         if meeting_choice == "Yes":
             meeting_text = f"\n\nWe would like to schedule a meeting to discuss this further. Please let us know your availability."
@@ -798,38 +803,53 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                         email_data['meeting_result'] = (None, "parse_error")
 
             elif meeting_choice == "Modify":
+                # Use GPT-4o to understand instruction and extract datetime + generate reply
                 try:
                     ist = pytz.timezone('Asia/Kolkata')
+                    current_time_ist = datetime.now(ist).isoformat()
+            
                     prompt = f"""
-                    You are a smart assistant that extracts meeting rescheduling intent.
-                    Given the following user instruction, determine:
-                    1. Whether the user wants to propose a new meeting time.
-                    2. The new meeting datetime in ISO 8601 format (IST).
-                    3. A polite sentence summarizing the change.
-                    Instruction: "{instructions}"
-                    Current time (IST): {datetime.now(ist).isoformat()}
-                    If a valid new time is proposed, output:
-                    PROPOSED_DATETIME: <ISO 8601>
-                    REPLY_TEXT: "We propose to meet on [formatted date and time] instead."
-                    If no valid time is found, output:
-                    PROPOSED_DATETIME: Not specified
-                    REPLY_TEXT: We are unable to meet at the originally proposed time. Please suggest an alternative time.
+                    You are a professional meeting assistant. Analyze the user's modification request and respond accordingly.
+            
+                    Instructions: "{instructions}"
+                    Current Time (IST): {current_time_ist}
+            
+                    Task:
+                    1. Determine if a valid meeting time is being proposed (e.g., "August 10th at 4 PM", "tomorrow at 11").
+                    2. If yes, convert it to ISO 8601 format in IST.
+                    3. Generate a polite reply explaining:
+                       - We can't meet at the original time
+                       - We propose the new time
+                       - A calendar invite has been sent
+            
+                    If no valid time is found, respond:
+                    DATETIME: Not specified
+                    REPLY: We are unable to meet at the originally proposed time. Please suggest an alternative time.
+            
+                    If valid, respond:
+                    DATETIME: <ISO 8601>
+                    REPLY: Thank you for your meeting request. As we are not available at the originally proposed time, we propose to meet on [formatted date and time] instead. We have scheduled the meeting and sent you a calendar invitation.
                     """
+            
                     response = client.chat.completions.create(
                         model="gpt-4o",
                         messages=[{"role": "user", "content": prompt}],
                         temperature=0.3,
-                        max_tokens=150
+                        max_tokens=200
                     )
                     content = response.choices[0].message.content.strip()
-
-                    proposed_dt_match = re.search(r"PROPOSED_DATETIME: (.+)", content)
-                    reply_text_match = re.search(r"REPLY_TEXT: (.+)", content)
-                    proposed_dt_str = proposed_dt_match.group(1).strip() if proposed_dt_match else "Not specified"
-                    reply_text = reply_text_match.group(1).strip() if reply_text_match else "We are unable to meet at the originally proposed time. Please suggest an alternative time."
-
+            
+                    # Parse output
+                    dt_match = re.search(r"DATETIME:\s*(.+)", content)
+                    reply_match = re.search(r"REPLY:\s*(.+)", content, re.DOTALL)
+            
+                    proposed_dt_str = dt_match.group(1).strip() if dt_match else "Not specified"
+                    reply_text = reply_match.group(1).strip() if reply_match else "We are unable to meet at the originally proposed time. Please suggest an alternative time."
+            
+                    # Store GPT-generated reply
                     email_data['modified_meeting_reply'] = reply_text
-
+            
+                    # Try to schedule if datetime is valid
                     if proposed_dt_str != "Not specified":
                         try:
                             proposed_dt = datetime.fromisoformat(proposed_dt_str)
@@ -841,18 +861,17 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                                 email_data['final_classification']
                             )
                             email_data['meeting_result'] = (event, status)
-                            if status == "scheduled":
-                                formatted_time = proposed_dt.strftime("%B %d, %Y at %I:%M %p")
-                                email_data['modified_meeting_reply'] = f"We propose to meet on {formatted_time} instead. We have scheduled the meeting and sent you a calendar invitation."
                         except Exception as e:
                             email_data['meeting_result'] = (None, "parse_error")
-                            email_data['modified_meeting_reply'] = "We are unable to process your requested time. Please suggest an alternative."
+                            email_data['modified_meeting_reply'] = "We are unable to process your requested time. Please suggest another."
                     else:
                         email_data['meeting_result'] = (None, "no_specific_time")
+            
                 except Exception as e:
                     email_data['modified_meeting_reply'] = "We are unable to meet at the originally proposed time. Please suggest an alternative time."
                     email_data['meeting_result'] = (None, "error")
 
+        # Generate reply body
         reply_body = get_reply_body(
             email_data['final_classification'],
             email_data['quotation_data'],
@@ -860,7 +879,8 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             meeting_details,
             email_data.get('meeting_result'),
             meeting_choice,
-            instructions
+            instructions,
+            modified_meeting_reply=email_data.get('modified_meeting_reply')
         )
 
         success, message = send_reply(
