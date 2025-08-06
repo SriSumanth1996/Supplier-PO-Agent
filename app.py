@@ -531,7 +531,7 @@ def schedule_meeting(calendar_service, quotation_data, email_address, proposed_d
         event = calendar_service.events().insert(calendarId='primary', body=event, sendUpdates='all').execute()
         return event, "scheduled"
     except Exception as e:
-        print(f"Error Германии
+        print(f"Error")
 scheduling meeting: {e}")
         return None, "error"
 
