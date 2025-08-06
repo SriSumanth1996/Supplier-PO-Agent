@@ -758,7 +758,7 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         subject = email_data['subject']
 
         try:
-            # Use GPT-4o to interpret instructions
+            # Use GPT to interpret instruction and decide action
             prompt = f"""
             You are an intelligent email assistant for supplier communication.
             Analyze the user's instruction and determine the correct actions.
@@ -769,25 +769,25 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             ORIGINAL PROPOSED TIME: {meeting_details.get('proposed_datetime')}
 
             TASK:
-            1. Determine if the instruction proposes a new meeting time (e.g., 'August 10 at 4 PM', 'tomorrow at 11').
-               - Return the datetime in ISO 8601 format (e.g., "2025-08-06T16:00:00+05:30") or "Not specified".
-            2. Determine if the instruction requests adding attendees (e.g., 'include our VP', 'invite Dr. Kesavan').
-               - Identify specific attendee names or roles mentioned.
-               - Map roles like 'VP' to an email if possible (e.g., VP -> vp@bitsom.edu).
-            3. Determine if the instruction contains a custom message unrelated to meetings or attendees.
-            4. If no meeting time is specified and no meeting exists, do not schedule a new meeting unless explicitly requested.
-            5. If the instruction is unrelated to meetings or attendees, return it as a custom message.
+            1. Determine intent:
+               - Is a new meeting time proposed? (e.g., 'August 10 at 4 PM', 'tomorrow at 11')
+               - Should attendees be added? (e.g., 'include our VP', 'invite Dr. Kesavan')
+               - Should the meeting be declined?
+               - Should the original time be accepted?
+               - Is this a custom message unrelated to meetings?
 
-            OUTPUT FORMAT (exact format, one line per field, no markdown, no quotes):
-            MEETING_DATETIME: 2025-08-06T16:00:00+05:30
-            ADD_ATTENDEES: Yes
-            ATTENDEE_EMAILS: vp@bitsom.edu
-            ATTENDEE_NAMES: VP
-            CUSTOM_MESSAGE: 
-            REPLY_TEXT: Thank you for your request. We have scheduled a meeting...
-            - DO NOT include any extra text before or after.
-            - DO NOT wrap values in quotes.
-            - Use only the exact field names listed.
+            2. Extract:
+               - Proposed datetime in ISO 8601 IST (e.g., "2025-08-06T16:00:00+05:30") or "Not specified"
+               - Attendee emails and names if mentioned (e.g., VP -> vp@bitsom.edu)
+               - Custom message if no meeting action
+
+            OUTPUT FORMAT (exact format, one line per field):
+            MEETING_ACTION: reschedule | accept_original | decline | no_meeting | custom_only
+            MEETING_DATETIME: <ISO 8601> or Not specified
+            ADD_ATTENDEES: Yes/No
+            ATTENDEE_EMAILS: email1@domain.com, email2@domain.com
+            ATTENDEE_NAMES: Name1, Name2
+            REPLY_TEXT: Full professional reply text (do not include 'REPLY_TEXT:' prefix)
             """
 
             response = client.chat.completions.create(
@@ -808,150 +808,84 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                         return line.split(":", 1)[1].strip()
                 return "Not specified"
 
+            action = extract_field(content, "MEETING_ACTION")
             proposed_dt_str = extract_field(content, "MEETING_DATETIME")
             add_attendees_str = extract_field(content, "ADD_ATTENDEES")
             attendee_emails_str = extract_field(content, "ATTENDEE_EMAILS")
             attendee_names_str = extract_field(content, "ATTENDEE_NAMES")
-            custom_message = extract_field(content, "CUSTOM_MESSAGE")
-            reply_text = extract_field(content, "REPLY_TEXT")
+            gpt_reply = extract_field(content, "REPLY_TEXT")
 
-            # Clean up reply_text
-            if reply_text.startswith("REPLY_TEXT:"):
-                reply_text = reply_text.replace("REPLY_TEXT:", "").strip()
-            if not reply_text or reply_text == "Not specified":
-                reply_text = get_reply_body(classification, email_data['quotation_data'], sender_name, meeting_details)
-                if instructions and not custom_message:
-                    custom_message = instructions
+            # Default fallback reply
+            if not gpt_reply or gpt_reply == "Not specified":
+                gpt_reply = "Thank you for your message. We will get back to you shortly."
 
-            # Handle meeting scheduling
-            meeting_result = email_data.get('meeting_result', (None, None))
-            if proposed_dt_str != "Not specified":
-                try:
-                    # Clean up the datetime string
-                    proposed_dt_str = proposed_dt_str.strip()
-                    if proposed_dt_str == "Not specified":
-                        raise ValueError("No datetime specified")
+            # === Handle Meeting Actions ===
+            final_reply = gpt_reply
 
-                    # Fix common formatting issues
-                    if " " in proposed_dt_str and "T" not in proposed_dt_str:
-                        parts = proposed_dt_str.split(" ")
-                        if len(parts) >= 2:
-                            date_part = parts[0]
-                            time_part = parts[1]
-                            tz = parts[2] if len(parts) > 2 else "+05:30"
-                            proposed_dt_str = f"{date_part}T{time_part}{tz}"
+            # If meeting is involved, try to schedule or update
+            if action in ["reschedule", "accept_original"] and meeting_details.get("meeting_intent") == "Yes":
+                target_dt_str = proposed_dt_str if action == "reschedule" else meeting_details["proposed_datetime"]
 
-                    # Remove extra text like "IST"
-                    proposed_dt_str = re.sub(r"[A-Z]{2,}$", "", proposed_dt_str).strip()
-                    proposed_dt_str = proposed_dt_str.replace("IST", "").strip()
-
+                if target_dt_str != "Not specified":
                     try:
-                        proposed_dt = datetime.fromisoformat(proposed_dt_str)
-                    except ValueError as ve:
-                        parsed = parse_new_datetime(proposed_dt_str)
-                        if parsed == "Not specified":
-                            raise ve
-                        proposed_dt = datetime.fromisoformat(parsed)
-
-                    event, status = schedule_meeting(
-                        calendar_service,
-                        email_data['quotation_data'],
-                        email_address,
-                        proposed_dt,
-                        classification
-                    )
-                    email_data['meeting_result'] = (event, status)
-
-                    if status == "scheduled":
-                        formatted_time = proposed_dt.strftime("%B %d, %Y at %I:%M %p")
-                        reply_text = (
-                            f"Thank you for your request. We have scheduled a meeting on {formatted_time} IST. "
-                            "A calendar invite has been sent to you."
+                        target_dt = datetime.fromisoformat(target_dt_str)
+                        event, status = schedule_meeting(
+                            calendar_service,
+                            email_data['quotation_data'],
+                            email_address,
+                            target_dt,
+                            classification
                         )
-                    else:
-                        reply_text = (
-                            f"We could not schedule the meeting due to {status.replace('_', ' ')}. "
-                            "Please suggest another time."
-                        )
-                except Exception as e:
-                    email_data['meeting_result'] = (None, "parse_error")
-                    reply_text = "We could not process your requested meeting time due to a parsing error. Please suggest another."
-            elif meeting_details.get('meeting_intent') == 'Yes' and meeting_details.get('proposed_datetime') != 'Not specified':
-                # Use original meeting time if no new time is specified
-                try:
-                    proposed_dt = datetime.fromisoformat(meeting_details['proposed_datetime'])
-                    event, status = schedule_meeting(
-                        calendar_service,
-                        email_data['quotation_data'],
-                        email_address,
-                        proposed_dt,
-                        classification
-                    )
-                    email_data['meeting_result'] = (event, status)
-                    if status == "scheduled":
-                        formatted_time = proposed_dt.strftime("%B %d, %Y at %I:%M %p")
-                        reply_text = (
-                            f"Thank you for your request. We have scheduled a meeting on {formatted_time} IST. "
-                            "A calendar invite has been sent to you."
-                        )
-                    else:
-                        reply_text = (
-                            f"We could not schedule the meeting due to {status.replace('_', ' ')}. "
-                            "Please suggest another time."
-                        )
-                except Exception as e:
-                    email_data['meeting_result'] = (None, "parse_error")
-                    reply_text = "We could not process the original meeting time. Please suggest another."
-
-            # Handle attendee addition
-            if add_attendees_str == "Yes" and attendee_emails_str:
-                try:
-                    event = email_data.get('meeting_result', (None, None))[0]
-                    if event:
-                        emails_list = [email.strip() for email in attendee_emails_str.split(",")]
-                        existing_attendees = event.get('attendees', [])
-                        new_attendees = [{'email': email} for email in emails_list if email not in str(existing_attendees)]
-                        if new_attendees:
-                            event['attendees'].extend(new_attendees)
-                            updated_event = calendar_service.events().update(
-                                calendarId='primary',
-                                eventId=event['id'],
-                                body=event,
-                                sendUpdates='all'
-                            ).execute()
-                            email_data['meeting_result'] = (updated_event, "attendees_added")
-                            reply_text += f"\nThe following attendees have been added: {attendee_names_str or attendee_emails_str}."
+                        email_data['meeting_result'] = (event, status)
+                        if status == "scheduled":
+                            formatted_time = target_dt.strftime("%B %d, %Y at %I:%M %p")
+                            final_reply = (
+                                f"Thank you for your request. We have scheduled a meeting on {formatted_time} IST. "
+                                "A calendar invite has been sent to you."
+                            )
                         else:
-                            reply_text += "\nNo new attendees were added as they are already included."
-                    else:
-                        reply_text += (
-                            f"\nNo meeting is currently scheduled, so we could not add {attendee_names_str or 'the requested attendees'}. "
-                            "Please propose a meeting time."
-                        )
-                except Exception as e:
-                    reply_text += f"\nFailed to add attendees due to an error: {str(e)}."
-            elif add_attendees_str == "Yes" and not attendee_emails_str:
-                reply_text += (
-                    f"\nWe could not add the requested attendees ({attendee_names_str}) as no valid email addresses were provided. "
-                    "Please provide their email addresses."
-                )
+                            final_reply = f"Could not schedule meeting: {status.replace('_', ' ')}. Please suggest another time."
+                    except Exception as e:
+                        email_data['meeting_result'] = (None, "parse_error")
+                        final_reply = "We could not process the requested meeting time. Please suggest another."
+                else:
+                    final_reply = "No valid meeting time was provided. Please specify a date and time."
 
-            # Append custom message if provided
-            if custom_message:
-                reply_text += f"\n\nRegarding your instruction: {custom_message}"
+            elif action == "decline" and meeting_details.get("meeting_intent") == "Yes":
+                final_reply = "Thank you for your meeting request. Unfortunately, we are unable to attend at this time."
 
-            # Final reply body
+            # === Handle Attendee Addition ===
+            if add_attendees_str == "Yes" and attendee_emails_str:
+                event = email_data.get('meeting_result', (None, None))[0]
+                if event:
+                    emails_list = [email.strip() for email in attendee_emails_str.split(",")]
+                    existing_attendees = {att.get('email') for att in event.get('attendees', [])}
+                    new_emails = [e for e in emails_list if e not in existing_attendees]
+                    if new_emails:
+                        event['attendees'].extend([{'email': e} for e in new_emails])
+                        updated_event = calendar_service.events().update(
+                            calendarId='primary',
+                            eventId=event['id'],
+                            body=event,
+                            sendUpdates='all'
+                        ).execute()
+                        email_data['meeting_result'] = (updated_event, "attendees_added")
+                        final_reply += f"\n\nThe following attendees have been added: {attendee_names_str or attendee_emails_str}."
+                else:
+                    final_reply += "\n\nNo meeting is currently scheduled, so attendees could not be added."
+
+            # === Final Reply Body ===
             reply_body = f"""
 Dear {sender_name},
 
-{reply_text}
+{final_reply}
 
 Best regards,
 Dr. Saravanan Kesavan
 BITSoM
             """.strip()
 
-            # Send the reply
+            # Send the email
             success, message = send_reply(service, email_data['thread_id'], email_address, subject, reply_body)
             if success:
                 success_count += 1
@@ -964,7 +898,6 @@ BITSoM
 
     progress_bar.progress(1.0)
     status_text.text('Bulk reply complete!')
-
     if success_count > 0:
         st.success(f"Successfully sent {success_count} replies!")
     if error_count > 0:
