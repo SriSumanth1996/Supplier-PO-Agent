@@ -606,24 +606,29 @@ Thank you for introducing your company and sharing your offerings with us."""
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your email."""
 
-    if instructions.strip():
+    meeting_text = ""
+    if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
         try:
             prompt = f"""
             You are a professional email assistant. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
             Email Classification: {classification}
             Original Meeting Details: {meeting_details}
+            Meeting Result: {meeting_result}
             Instructions from User: "{instructions}"
             Guidelines:
-            1. If instructions contain a new meeting time:
-               - Politely explain we can't meet at original time (if applicable)
-               - Propose the new time
-               - Mention calendar invite will be sent
-            2. If instructions request someone to join:
-               - Politely request their presence
-               - Explain why if reason is given
-            3. For other instructions:
-               - Incorporate naturally into the email
-            4. Keep tone professional and polite
+            1. If meeting_result indicates 'outside_business_hours':
+               - Politely explain the proposed time is outside business hours (9 AM to 5 PM IST).
+               - If instructions provide a new valid time, propose that time and mention a calendar invite will be sent.
+               - Otherwise, ask the recipient to suggest a time within business hours.
+            2. If instructions contain a new meeting time and meeting_result is not 'outside_business_hours':
+               - Politely explain we can't meet at the original time (if applicable).
+               - Propose the new time and mention a calendar invite will be sent.
+            3. If instructions request someone to join (e.g., VP):
+               - Politely request their presence and explain why if a reason is given.
+            4. For other instructions:
+               - Incorporate naturally into the email.
+            5. If meeting_result is 'scheduled', confirm the meeting time.
+            6. Keep tone professional and polite.
             Respond ONLY with the text to be inserted in the email (no headings or markers).
             """
             response = client.chat.completions.create(
@@ -635,8 +640,6 @@ Thank you for your email."""
             meeting_text = "\n\n" + response.choices[0].message.content.strip()
         except Exception as e:
             meeting_text = f"\n\nAdditional Instructions: {instructions}"
-    else:
-        meeting_text = ""
 
     base_message += meeting_text
 
@@ -780,7 +783,10 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         status_text.text(f'Sending reply {i + 1} of {len(selected_emails)}...')
         instructions = getattr(row, 'Instructions')
         meeting_details = email_data.get('meeting_details', {})
-        if instructions.strip() and meeting_details.get('meeting_intent') == "Yes":
+        meeting_result = email_data.get('meeting_result', (None, None))
+        
+        # Check if the original meeting time was outside business hours or not scheduled
+        if meeting_details.get('meeting_intent') == "Yes" and (meeting_result[1] in [None, "outside_business_hours", "no_specific_time"]):
             try:
                 ist = pytz.timezone('Asia/Kolkata')
                 current_time_ist = datetime.now(ist).isoformat()
@@ -807,8 +813,14 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                         email_data['final_classification']
                     )
                     email_data['meeting_result'] = (event, status)
+                elif meeting_result[1] == "outside_business_hours":
+                    # If no new time is provided and original was outside business hours, keep the status
+                    email_data['meeting_result'] = (None, "outside_business_hours")
+                else:
+                    email_data['meeting_result'] = (None, "no_specific_time")
             except Exception as e:
                 email_data['meeting_result'] = (None, "parse_error")
+        
         reply_body = get_reply_body(
             email_data['final_classification'],
             email_data['quotation_data'],
