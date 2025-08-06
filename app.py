@@ -760,7 +760,7 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         try:
             # Use GPT to interpret instruction and decide action
             prompt = f"""
-            You are an intelligent email assistant for supplier communication.
+            You are an intelligent email assistant for supplier communication. You talk on behalf of the user.
             Analyze the user's instruction and determine the correct actions.
 
             INSTRUCTIONS: "{instructions}"
