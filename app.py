@@ -563,20 +563,15 @@ def get_reply_body(classification, quotation_data, sender_name, meeting_details=
     if classification == "Quotation Received":
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your quotation. We have received the full details regarding your product and pricing."""
-        if meeting_details and meeting_details.get("meeting_intent") == "Yes":
-            if meeting_choice == "Yes":
-                if meeting_details.get("proposed_datetime") != "Not specified":
-                    try:
-                        proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
-                        formatted_date = proposed_dt.strftime("%B %d, %Y")
-                        formatted_time = proposed_dt.strftime("%I:%M %p")
-                        meeting_text = f"\n\nWe have scheduled the meeting as requested for {formatted_date} at {formatted_time}. Please check your calendar for the invitation."
-                    except:
-                        meeting_text = "\n\nWe have scheduled the meeting as requested. Please check your calendar for the invitation."
-                else:
+        if meeting_details and meeting_details.get("meeting_intent") == "Yes" and meeting_choice != "No":
+            if meeting_choice == "Yes" and meeting_details.get("proposed_datetime") != "Not specified":
+                try:
+                    proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
+                    formatted_date = proposed_dt.strftime("%B %d, %Y")
+                    formatted_time = proposed_dt.strftime("%I:%M %p")
+                    meeting_text = f"\n\nWe have scheduled the meeting as requested for {formatted_date} at {formatted_time}. Please check your calendar for the invitation."
+                except:
                     meeting_text = "\n\nWe have scheduled the meeting as requested. Please check your calendar for the invitation."
-            elif meeting_choice == "No":
-                meeting_text = "\n\nThank you for your meeting request. Unfortunately, we are unable to attend a meeting at this time."
             elif meeting_choice == "Modify":
                 new_datetime = parse_new_datetime(instructions)
                 if new_datetime != "Not specified":
@@ -584,14 +579,16 @@ Thank you for your quotation. We have received the full details regarding your p
                         proposed_dt = datetime.fromisoformat(new_datetime)
                         formatted_date = proposed_dt.strftime("%B %d, %Y")
                         formatted_time = proposed_dt.strftime("%I:%M %p")
-                        meeting_text = f"\n\nRegarding your meeting request, we propose an alternative time on {formatted_date} at {formatted_time}. An invitation has been sent; please confirm your availability."
+                        meeting_text = f"\n\nWe apologize for not being available at the requested time. We propose an alternative meeting time on {formatted_date} at {formatted_time}. An invitation has been sent; please confirm your availability."
                     except:
-                        meeting_text = f"\n\nRegarding your meeting request, we propose an alternative arrangement: {instructions}. Please confirm your availability."
+                        meeting_text = f"\n\nWe apologize for not being available at the requested time. We propose an alternative arrangement: {instructions}. Please confirm your availability."
                 else:
-                    meeting_text = f"\n\nRegarding your meeting request, we propose an alternative arrangement: {instructions}. Please confirm your availability."
+                    meeting_text = f"\n\nWe apologize for not being available at the requested time. We propose an alternative arrangement: {instructions}. Please confirm your availability."
             else:
                 meeting_text = ""
             base_message += meeting_text
+        elif meeting_details and meeting_details.get("meeting_intent") == "Yes" and meeting_choice == "No":
+            base_message += "\n\nThank you for your meeting request. Unfortunately, we are unable to attend a meeting at this time."
         base_message += "\n\nLooking forward to your response.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
         return base_message
     elif classification == "Quotation Partially Received":
@@ -610,20 +607,15 @@ Thank you for your quotation. We have reviewed the information provided, however
             base_message += f"\n\nPlease provide the following missing information:"
             for i, item in enumerate(missing_items, 1):
                 base_message += f"\n{i}. {item.title()}"
-        if meeting_details and meeting_details.get("meeting_intent") == "Yes":
-            if meeting_choice == "Yes":
-                if meeting_details.get("proposed_datetime") != "Not specified":
-                    try:
-                        proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
-                        formatted_date = proposed_dt.strftime("%B %d, %Y")
-                        formatted_time = proposed_dt.strftime("%I:%M %p")
-                        meeting_text = f"\n\nWe have scheduled the meeting as requested for {formatted_date} at {formatted_time}. Please check your calendar for the invitation."
-                    except:
-                        meeting_text = "\n\nWe have scheduled the meeting as requested. Please check your calendar for the invitation."
-                else:
+        if meeting_details and meeting_details.get("meeting_intent") == "Yes" and meeting_choice != "No":
+            if meeting_choice == "Yes" and meeting_details.get("proposed_datetime") != "Not specified":
+                try:
+                    proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
+                    formatted_date = proposed_dt.strftime("%B %d, %Y")
+                    formatted_time = proposed_dt.strftime("%I:%M %p")
+                    meeting_text = f"\n\nWe have scheduled the meeting as requested for {formatted_date} at {formatted_time}. Please check your calendar for the invitation."
+                except:
                     meeting_text = "\n\nWe have scheduled the meeting as requested. Please check your calendar for the invitation."
-            elif meeting_choice == "No":
-                meeting_text = "\n\nThank you for your meeting request. Unfortunately, we are unable to attend a meeting at this time."
             elif meeting_choice == "Modify":
                 new_datetime = parse_new_datetime(instructions)
                 if new_datetime != "Not specified":
@@ -631,33 +623,30 @@ Thank you for your quotation. We have reviewed the information provided, however
                         proposed_dt = datetime.fromisoformat(new_datetime)
                         formatted_date = proposed_dt.strftime("%B %d, %Y")
                         formatted_time = proposed_dt.strftime("%I:%M %p")
-                        meeting_text = f"\n\nRegarding your meeting request, we propose an alternative time on {formatted_date} at {formatted_time}. An invitation has been sent; please confirm your availability."
+                        meeting_text = f"\n\nWe apologize for not being available at the requested time. We propose an alternative meeting time on {formatted_date} at {formatted_time}. An invitation has been sent; please confirm your availability."
                     except:
-                        meeting_text = f"\n\nRegarding your meeting request, we propose an alternative arrangement: {instructions}. Please confirm your availability."
+                        meeting_text = f"\n\nWe apologize for not being available at the requested time. We propose an alternative arrangement: {instructions}. Please confirm your availability."
                 else:
-                    meeting_text = f"\n\nRegarding your meeting request, we propose an alternative arrangement: {instructions}. Please confirm your availability."
+                    meeting_text = f"\n\nWe apologize for not being available at the requested time. We propose an alternative arrangement: {instructions}. Please confirm your availability."
             else:
                 meeting_text = ""
             base_message += meeting_text
+        elif meeting_details and meeting_details.get("meeting_intent") == "Yes" and meeting_choice == "No":
+            base_message += "\n\nThank you for your meeting request. Unfortunately, we are unable to attend a meeting at this time."
         base_message += "\n\nOnce we receive the complete information, we will be able to proceed with our evaluation.\n\nThank you for your cooperation.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
         return base_message
     elif classification == "New Business Connection":
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for introducing your company and sharing your offerings with us."""
-        if meeting_details and meeting_details.get("meeting_intent") == "Yes":
-            if meeting_choice == "Yes":
-                if meeting_details.get("proposed_datetime") != "Not specified":
-                    try:
-                        proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
-                        formatted_date = proposed_dt.strftime("%B %d, %Y")
-                        formatted_time = proposed_dt.strftime("%I:%M %p")
-                        meeting_text = f"\n\nWe have scheduled the meeting as requested for {formatted_date} at {formatted_time}. Please check your calendar for the invitation."
-                    except:
-                        meeting_text = "\n\nWe have scheduled the meeting as requested. Please check your calendar for the invitation."
-                else:
+        if meeting_details and meeting_details.get("meeting_intent") == "Yes" and meeting_choice != "No":
+            if meeting_choice == "Yes" and meeting_details.get("proposed_datetime") != "Not specified":
+                try:
+                    proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
+                    formatted_date = proposed_dt.strftime("%B %d, %Y")
+                    formatted_time = proposed_dt.strftime("%I:%M %p")
+                    meeting_text = f"\n\nWe have scheduled the meeting as requested for {formatted_date} at {formatted_time}. Please check your calendar for the invitation."
+                except:
                     meeting_text = "\n\nWe have scheduled the meeting as requested. Please check your calendar for the invitation."
-            elif meeting_choice == "No":
-                meeting_text = "\n\nThank you for your meeting request. Unfortunately, we are unable to attend a meeting at this time."
             elif meeting_choice == "Modify":
                 new_datetime = parse_new_datetime(instructions)
                 if new_datetime != "Not specified":
@@ -665,14 +654,16 @@ Thank you for introducing your company and sharing your offerings with us."""
                         proposed_dt = datetime.fromisoformat(new_datetime)
                         formatted_date = proposed_dt.strftime("%B %d, %Y")
                         formatted_time = proposed_dt.strftime("%I:%M %p")
-                        meeting_text = f"\n\nRegarding your meeting request, we propose an alternative time on {formatted_date} at {formatted_time}. An invitation has been sent; please confirm your availability."
+                        meeting_text = f"\n\nWe apologize for not being available at the requested time. We propose an alternative meeting time on {formatted_date} at {formatted_time}. An invitation has been sent; please confirm your availability."
                     except:
-                        meeting_text = f"\n\nRegarding your meeting request, we propose an alternative arrangement: {instructions}. Please confirm your availability."
+                        meeting_text = f"\n\nWe apologize for not being available at the requested time. We propose an alternative arrangement: {instructions}. Please confirm your availability."
                 else:
-                    meeting_text = f"\n\nRegarding your meeting request, we propose an alternative arrangement: {instructions}. Please confirm your availability."
+                    meeting_text = f"\n\nWe apologize for not being available at the requested time. We propose an alternative arrangement: {instructions}. Please confirm your availability."
             else:
                 meeting_text = ""
             base_message += meeting_text
+        elif meeting_details and meeting_details.get("meeting_intent") == "Yes" and meeting_choice == "No":
+            base_message += "\n\nThank you for your meeting request. Unfortunately, we are unable to attend a meeting at this time."
         base_message += "\n\nWe will keep your information on record and reach out to you when opportunities arise.\n\nWarm regards,\nDr. Saravanan Kesavan\nBITSoM"
         return base_message
     else:
@@ -721,15 +712,14 @@ def create_quotation_received_table(emails):
             'Location': qd.get('place', 'Not present'),
             'Contact': qd.get('contact_number', 'Not present'),
             'Meeting Status': meeting_status,
-            'Response': False,
+            'Send': False,
             'Meeting': 'No' if meeting_status == "No Meeting Requested" else 'Yes',
             'Instructions': '',
             'Meeting_Disabled': meeting_status == "No Meeting Requested",
-            'Instructions_Disabled': meeting_status == "No Meeting Requested" or 'Yes' == 'Yes'  # Will be updated dynamically
+            'Instructions_Disabled': meeting_status == "No Meeting Requested"
         })
     df = pd.DataFrame(data)
-    # Update Instructions_Disabled based on Meeting column
-    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1)
+    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] != 'Modify' or x['Meeting_Disabled'], axis=1)
     return df
 
 def create_quotation_partial_table(emails):
@@ -761,15 +751,14 @@ def create_quotation_partial_table(emails):
             'Contact': qd.get('contact_number', 'Not present'),
             'Missing Fields': ', '.join(missing_fields) if missing_fields else 'None',
             'Meeting Status': meeting_status,
-            'Response': False,
+            'Send': False,
             'Meeting': 'No' if meeting_status == "No Meeting Requested" else 'Yes',
             'Instructions': '',
             'Meeting_Disabled': meeting_status == "No Meeting Requested",
-            'Instructions_Disabled': meeting_status == "No Meeting Requested" or 'Yes' == 'Yes'  # Will be updated dynamically
+            'Instructions_Disabled': meeting_status == "No Meeting Requested"
         })
     df = pd.DataFrame(data)
-    # Update Instructions_Disabled based on Meeting column
-    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1)
+    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] != 'Modify' or x['Meeting_Disabled'], axis=1)
     return df
 
 def create_business_connection_table(emails):
@@ -787,40 +776,47 @@ def create_business_connection_table(emails):
             'Location': qd.get('place', 'Not present'),
             'Contact': qd.get('contact_number', 'Not present'),
             'Meeting Status': meeting_status,
-            'Response': False,
+            'Send': False,
             'Meeting': 'No' if meeting_status == "No Meeting Requested" else 'Yes',
             'Instructions': '',
             'Meeting_Disabled': meeting_status == "No Meeting Requested",
-            'Instructions_Disabled': meeting_status == "No Meeting Requested" or 'Yes' == 'Yes'  # Will be updated dynamically
+            'Instructions_Disabled': meeting_status == "No Meeting Requested"
         })
     df = pd.DataFrame(data)
-    # Update Instructions_Disabled based on Meeting column
-    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1)
+    df['Instructions_Disabled'] = df.apply(lambda x: x['Meeting'] != 'Modify' or x['Meeting_Disabled'], axis=1)
     return df
 
 def send_replies_for_emails(service, calendar_service, emails, df):
     success_count = 0
     error_count = 0
+    selected_emails = [(email, row) for email, row in zip(emails, df.itertuples(index=False)) if getattr(row, 'Send')]
+    if not selected_emails:
+        st.warning("No emails selected to send replies.")
+        return
     progress_bar = st.progress(0)
     status_text = st.empty()
-    for i, (email_data, row) in enumerate(zip(emails, df.itertuples(index=False))):
-        if not getattr(row, 'Response'):
-            continue
-        progress = (i + 1) / len(emails)
+    for i, (email_data, row) in enumerate(selected_emails):
+        progress = (i + 1) / len(selected_emails)
         progress_bar.progress(progress)
-        status_text.text(f'Sending reply {i + 1} of {len(emails)}...')
+        status_text.text(f'Sending reply {i + 1} of {len(selected_emails)}...')
         meeting_choice = getattr(row, 'Meeting')
         instructions = getattr(row, 'Instructions')
-        reply_body = get_reply_body(
-            email_data['final_classification'],
-            email_data['quotation_data'],
-            email_data['quotation_data'].get('sender_name'),
-            email_data.get('meeting_details'),
-            email_data.get('meeting_result'),
-            meeting_choice,
-            instructions
-        )
-        if meeting_choice == "Modify" and email_data.get('meeting_details', {}).get('meeting_intent') == "Yes":
+        meeting_details = email_data.get('meeting_details', {})
+        if meeting_details.get('meeting_intent') == "Yes" and meeting_choice == "Yes":
+            if meeting_details.get("proposed_datetime") != "Not specified":
+                try:
+                    proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
+                    event, status = schedule_meeting(
+                        calendar_service,
+                        email_data['quotation_data'],
+                        email_data['email_address'],
+                        proposed_dt,
+                        email_data['final_classification']
+                    )
+                    email_data['meeting_result'] = (event, status)
+                except:
+                    email_data['meeting_result'] = (None, "parse_error")
+        elif meeting_details.get('meeting_intent') == "Yes" and meeting_choice == "Modify":
             new_datetime = parse_new_datetime(instructions)
             if new_datetime != "Not specified":
                 try:
@@ -832,10 +828,18 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                         proposed_dt,
                         email_data['final_classification']
                     )
-                    if status != "scheduled":
-                        reply_body += f"\n\nNote: Could not schedule the proposed meeting due to {status}. Please suggest another time."
+                    email_data['meeting_result'] = (event, status)
                 except:
-                    pass
+                    email_data['meeting_result'] = (None, "parse_error")
+        reply_body = get_reply_body(
+            email_data['final_classification'],
+            email_data['quotation_data'],
+            email_data['quotation_data'].get('sender_name'),
+            meeting_details,
+            email_data.get('meeting_result'),
+            meeting_choice,
+            instructions
+        )
         success, message = send_reply(
             service,
             email_data['thread_id'],
@@ -870,7 +874,7 @@ def display_classification_tables(processed_emails):
             edited_df_complete = st.data_editor(
                 df_complete,
                 column_config={
-                    "Response": st.column_config.CheckboxColumn("Response", default=False),
+                    "Send": st.column_config.CheckboxColumn("Send", default=False),
                     "Meeting": st.column_config.SelectboxColumn(
                         "Meeting",
                         options=["Yes", "No", "Modify"],
@@ -881,16 +885,12 @@ def display_classification_tables(processed_emails):
                         "Instructions",
                         disabled="Instructions_Disabled"
                     ),
-                    "Meeting_Disabled": None,  # Hide this column
-                    "Instructions_Disabled": None  # Hide this column
+                    "Meeting_Disabled": None,
+                    "Instructions_Disabled": None
                 },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
-            )
-            # Update Instructions_Disabled based on edited Meeting column
-            edited_df_complete['Instructions_Disabled'] = edited_df_complete.apply(
-                lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1
             )
             csv_complete = edited_df_complete.drop(columns=['Meeting_Disabled', 'Instructions_Disabled']).to_csv(index=False)
             st.download_button(
@@ -899,7 +899,7 @@ def display_classification_tables(processed_emails):
                 file_name=f"complete_quotations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
-            if st.button("Send Replies to Complete Quotations"):
+            if st.button("Send for Selected Complete Quotations"):
                 send_replies_for_emails(st.session_state.gmail_service, st.session_state.calendar_service, quotation_received, edited_df_complete)
         else:
             st.info("No complete quotations found in the processed emails.")
@@ -909,7 +909,7 @@ def display_classification_tables(processed_emails):
             edited_df_partial = st.data_editor(
                 df_partial,
                 column_config={
-                    "Response": st.column_config.CheckboxColumn("Response", default=False),
+                    "Send": st.column_config.CheckboxColumn("Send", default=False),
                     "Meeting": st.column_config.SelectboxColumn(
                         "Meeting",
                         options=["Yes", "No", "Modify"],
@@ -920,16 +920,12 @@ def display_classification_tables(processed_emails):
                         "Instructions",
                         disabled="Instructions_Disabled"
                     ),
-                    "Meeting_Disabled": None,  # Hide this column
-                    "Instructions_Disabled": None  # Hide this column
+                    "Meeting_Disabled": None,
+                    "Instructions_Disabled": None
                 },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
-            )
-            # Update Instructions_Disabled based on edited Meeting column
-            edited_df_partial['Instructions_Disabled'] = edited_df_partial.apply(
-                lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1
             )
             csv_partial = edited_df_partial.drop(columns=['Meeting_Disabled', 'Instructions_Disabled']).to_csv(index=False)
             st.download_button(
@@ -938,7 +934,7 @@ def display_classification_tables(processed_emails):
                 file_name=f"partial_quotations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
-            if st.button("Send Replies to Partial Quotations"):
+            if st.button("Send for Selected Partial Quotations"):
                 send_replies_for_emails(st.session_state.gmail_service, st.session_state.calendar_service, quotation_partial, edited_df_partial)
         else:
             st.info("No partial quotations found in the processed emails.")
@@ -949,7 +945,7 @@ def display_classification_tables(processed_emails):
             edited_df_business = st.data_editor(
                 df_business,
                 column_config={
-                    "Response": st.column_config.CheckboxColumn("Response", default=False),
+                    "Send": st.column_config.CheckboxColumn("Send", default=False),
                     "Meeting": st.column_config.SelectboxColumn(
                         "Meeting",
                         options=["Yes", "No", "Modify"],
@@ -960,16 +956,12 @@ def display_classification_tables(processed_emails):
                         "Instructions",
                         disabled="Instructions_Disabled"
                     ),
-                    "Meeting_Disabled": None,  # Hide this column
-                    "Instructions_Disabled": None  # Hide this column
+                    "Meeting_Disabled": None,
+                    "Instructions_Disabled": None
                 },
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True
-            )
-            # Update Instructions_Disabled based on edited Meeting column
-            edited_df_business['Instructions_Disabled'] = edited_df_business.apply(
-                lambda x: x['Meeting'] == 'Yes' or x['Meeting_Disabled'], axis=1
             )
             csv_business = edited_df_business.drop(columns=['Meeting_Disabled', 'Instructions_Disabled']).to_csv(index=False)
             st.download_button(
@@ -978,7 +970,7 @@ def display_classification_tables(processed_emails):
                 file_name=f"business_connections_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
-            if st.button("Send Replies to New Business Connections"):
+            if st.button("Send for Selected Business Connections"):
                 send_replies_for_emails(st.session_state.gmail_service, st.session_state.calendar_service, business_connection, edited_df_business)
         else:
             st.info("No new business connection emails found in the processed emails.")
@@ -1020,33 +1012,12 @@ def process_emails(gmail_service, calendar_service, num_emails=5):
         final_classification = get_final_classification(quotation_data, initial_classification)
         name = sender.split("<")[0].strip() if "<" in sender else sender
         email_address = sender.split("<")[1][:-1] if "<" in sender else sender
-        scheduled_event = None
-        meeting_result = None
-        if meeting_details and meeting_details.get("meeting_intent") == "Yes":
-            if meeting_details.get("proposed_datetime") != "Not specified":
-                try:
-                    proposed_datetime = datetime.fromisoformat(meeting_details["proposed_datetime"])
-                except Exception as e:
-                    proposed_datetime = None
-                if proposed_datetime:
-                    scheduled_event, status = schedule_meeting(
-                        calendar_service,
-                        quotation_data,
-                        email_address,
-                        proposed_datetime,
-                        final_classification
-                    )
-                    meeting_result = (scheduled_event, status)
-                else:
-                    meeting_result = (None, "parse_error")
-            else:
-                meeting_result = (None, "incomplete_details")
         reply_body = get_reply_body(
             final_classification,
             quotation_data,
             quotation_data.get("sender_name"),
             meeting_details,
-            meeting_result
+            None
         )
         processed_emails.append({
             "email_address": email_address,
@@ -1054,7 +1025,7 @@ def process_emails(gmail_service, calendar_service, num_emails=5):
             "final_classification": final_classification,
             "quotation_data": quotation_data,
             "meeting_details": meeting_details,
-            "meeting_result": meeting_result,
+            "meeting_result": None,
             "reply_body": reply_body,
             "thread_id": thread_id
         })
