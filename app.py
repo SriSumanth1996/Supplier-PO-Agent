@@ -622,8 +622,8 @@ Thank you for your email."""
             Instructions from User: "{instructions}"
             Guidelines:
             1. Avoid redundant phrases like "Thank you for your quotation" if already mentioned in the base message.
-            2. If instructions include changes to the meeting schedule, follow the new directives. Otherwise, if instructions address unrelated matters, confirm the sender's proposed time and date and schedule the meeting.
-            2. For meeting scheduling:
+            2. If the instruction doesn't mention rescheduling or concerns non-meeting directives, assume the proposed time and date are acceptable and schedule the meeting accordingly.
+            3. For meeting scheduling:
                - If instructions indicate a need for **confirmation** (e.g., words like "ask", "check", "confirm", "whether they are okay", "suggest", "propose"):
                  - Propose the new time politely.
                  - Ask for confirmation.
@@ -642,21 +642,21 @@ Thank you for your email."""
                      - If no alternative time is provided, request the recipient to suggest a time within business hours.
                      - If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
                         These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
-            3. If meeting_result is 'scheduled':
+            4. If meeting_result is 'scheduled':
                    - Confirm the meeting time.
                    - Mention that a calendar invite has been sent.
-            4. If meeting_result is "conflict":
+            5. If meeting_result is "conflict":
                  - Say that the requested slot is not available.
                  - If instructions provide a new valid time:
                     - If confirmation is needed: Propose the new time and ask for confirmation.
                     - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
                  -  If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
                     These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
-            5. End the message with a professional closing as per the mail with the following signature:
+            6. End the message with a professional closing as per the mail with the following signature:
                'Best regards,'
                'Dr. Saravanan Kesavan'
                'BITSoM'
-            6. Keep tone professional and polite.
+            7. Keep tone professional and polite.
             Respond ONLY with the text to be inserted in the email (no extra headings or markers).
             """
             response = client.chat.completions.create(
