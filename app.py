@@ -582,33 +582,12 @@ def get_meeting_date_time(meeting_details):
         return "Not Specified", "Not Specified"
 
 
-def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
-    """
-    Generate email reply body with specific logic for 9 different scenarios
-    """
+def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None,
+                   instructions=""):
     ist = pytz.timezone('Asia/Kolkata')
-    
-    # Determine meeting scenario
-    meeting_intent = meeting_details.get('meeting_intent') if meeting_details else "No"
-    proposed_datetime = meeting_details.get('proposed_datetime') if meeting_details else "Not specified"
-    meeting_status = meeting_result[1] if meeting_result and len(meeting_result) > 1 else None
-    
-    # Categorize meeting scenario
-    if meeting_intent != "Yes":
-        meeting_scenario = "Without Time or Date or Both"
-    elif proposed_datetime == "Not specified":
-        meeting_scenario = "Without Time or Date or Both"
-    elif meeting_status == "outside_business_hours":
-        meeting_scenario = "With time and date but outside business hours"
-    else:
-        meeting_scenario = "Proper mention of time and date and within business hours"
-    
-    # Base message based on classification
     if classification == "Quotation Received":
         base_message = f"""Dear {sender_name or 'Supplier'},
-
-We have received your quotation with all the required details regarding your product and pricing."""
-        
+Thank you for your quotation. We have received the full details regarding your product and pricing."""
     elif classification == "Quotation Partially Received":
         missing_items = []
         if quotation_data.get("product", "Not present") == "Not present":
@@ -619,271 +598,75 @@ We have received your quotation with all the required details regarding your pro
             missing_items.append("quantity")
         if quotation_data.get("lead_time", "Not present") == "Not present":
             missing_items.append("lead time")
-            
         base_message = f"""Dear {sender_name or 'Supplier'},
-
-We have reviewed your quotation, however, we need additional details to complete our evaluation."""
-        
+Thank you for your quotation. We have reviewed the information provided, however, we need additional details to complete our evaluation."""
         if missing_items:
-            base_message += "\n\nPlease provide the following missing information:"
+            base_message += "\nPlease provide the following missing information:"
             for i, item in enumerate(missing_items, 1):
                 base_message += f"\n{i}. {item.title()}"
-                
     elif classification == "New Business Connection":
         base_message = f"""Dear {sender_name or 'Supplier'},
-
 Thank you for introducing your company and sharing your offerings with us."""
-        
     else:
         base_message = f"""Dear {sender_name or 'Supplier'},
-
 Thank you for your email."""
 
-    # Generate meeting text based on scenario
     meeting_text = ""
-    if instructions.strip():
+    if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
         try:
-            # Determine instruction type
-            time_related_words = ['schedule', 'book', 'meeting', 'time', 'date', 'am', 'pm', 'morning', 'afternoon', 'evening', 'today', 'tomorrow', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-            is_time_related = any(word.lower() in instructions.lower() for word in time_related_words)
-            
-            # Choose appropriate prompt based on classification and meeting scenario
-            prompt = get_scenario_prompt(classification, meeting_scenario, is_time_related, instructions, meeting_details, meeting_result)
-            
+            prompt = f"""
+            You are a professional email assistant for the case of creating responses to suppliers who come for quotations. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
+            Email Classification: {classification}
+            Original Meeting Details: {meeting_details}
+            Meeting Result: {meeting_result}
+            Instructions from User: "{instructions}"
+            Guidelines:
+            1. If meeting_result indicates 'outside_business_hours':
+               - Don't schedule any meeting at the time requested in the mail by the sender.
+               - Politely explain the proposed time is outside business hours (9 AM to 5 PM IST).
+               - If instructions provide a new valid time, propose that time and mention a calendar invite will be sent.
+               - Otherwise, ask the recipient to suggest a time within business hours.
+            2. If instructions contain a new meeting time and meeting_result is not 'outside_business_hours':
+               - Politely explain we can't meet at the original time proposed by the supplier.
+               - If the instructions ask to schedule the meeting and confirm with the supplier, go ahead and schedule it for the specified date and time, and politely ask the supplier to confirm if it works for them.
+               - If the instructions only suggest proposing a time and checking availability, do not schedule the meeting. Instead, mention the proposed date and time, and ask the supplier if it works for them.
+            3. If instructions request someone to join (e.g., VP):
+               - Politely request their presence and explain briefly why if a reason is given.
+            4. For other instructions:
+               - Incorporate naturally into the email in precise, concise and professional manner.
+            5. If meeting_result is 'scheduled', confirm the meeting time and include a line like:
+               'A calendar invite has been sent to ensure all parties are aligned.'
+            6. End the message with a professional closing:
+               'Looking forward to our discussion.'
+               'Best regards,'
+               'Dr. Saravanan Kesavan'
+               'BITSoM'
+            7. Keep tone professional and polite.
+            Respond ONLY with the text to be inserted in the email (no extra headings or markers).
+            """
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=400
+                max_tokens=300
             )
-            meeting_text = "\n\n" + response.choices[0].message.content.strip()
-            
+            meeting_text = "\n" + response.choices[0].message.content.strip()
         except Exception as e:
-            meeting_text = f"\n\nAdditional Instructions: {instructions}"
+            meeting_text = f"\nAdditional Instructions: {instructions}"
 
-    # Combine base message with meeting text
-    full_message = base_message + meeting_text
-    
-    return full_message
+    # Now: Let AI generate the full closing including "Best regards"
+    base_message += meeting_text
 
+    return base_message
 
-def get_scenario_prompt(classification, meeting_scenario, is_time_related, instructions, meeting_details, meeting_result):
-    """
-    Returns specific prompt based on classification and meeting scenario
-    """
-    
-    # SCENARIO 1: Complete Quotation + Without Time/Date
-    if classification == "Quotation Received" and meeting_scenario == "Without Time or Date or Both":
-        if not is_time_related:
-            return f"""
-            You are responding to a complete quotation where NO time/date was specified by the supplier.
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Explicitly state that time and/or date have NOT been specified in the supplier's message
-            2. Acknowledge and incorporate ALL other instructions (VP attendance, hotel meetings, etc.)
-            3. Keep the tone professional and helpful
-            4. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-        else:
-            return f"""
-            You are responding to a complete quotation where NO time/date was specified by the supplier.
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Recognize that time and/or date are NOT mentioned in the supplier's message
-            2. Propose a suitable time/date as per the instructions
-            3. Confirm that a calendar invite will be sent
-            4. Address any other instructions provided
-            5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-    
-    # SCENARIO 2: Partial Quotation + Without Time/Date
-    elif classification == "Quotation Partially Received" and meeting_scenario == "Without Time or Date or Both":
-        if not is_time_related:
-            return f"""
-            You are responding to a partial quotation where NO time/date was specified by the supplier.
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Explicitly state that time and/or date have NOT been specified in the supplier's message
-            2. Acknowledge and incorporate ALL other instructions (VP attendance, hotel meetings, etc.)
-            3. Keep the tone professional
-            4. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-        else:
-            return f"""
-            You are responding to a partial quotation where NO time/date was specified by the supplier.
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Recognize that time and/or date are NOT mentioned in the supplier's message
-            2. Propose a suitable time/date as per the instructions
-            3. Confirm that a calendar invite will be sent
-            4. Address any other instructions provided
-            5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-    
-    # SCENARIO 3: New Business Connection + Without Time/Date
-    elif classification == "New Business Connection" and meeting_scenario == "Without Time or Date or Both":
-        if not is_time_related:
-            return f"""
-            You are responding to a new business connection where NO time/date was specified by the supplier.
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Explicitly state that time and/or date have NOT been specified in the supplier's message
-            2. Acknowledge and incorporate ALL other instructions (VP attendance, hotel meetings, etc.)
-            3. Keep the tone welcoming and professional
-            4. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-        else:
-            return f"""
-            You are responding to a new business connection where NO time/date was specified by the supplier.
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Recognize that time and/or date are NOT mentioned in the supplier's message
-            2. Propose a suitable time/date as per the instructions
-            3. Confirm that a calendar invite will be sent
-            4. Address any other instructions provided
-            5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-    
-    # SCENARIO 4: Complete Quotation + Outside Business Hours
-    elif classification == "Quotation Received" and meeting_scenario == "With time and date but outside business hours":
-        if not is_time_related:
-            return f"""
-            You are responding to a complete quotation where the supplier proposed a time OUTSIDE business hours (9 AM - 5 PM IST).
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Explicitly state that the time requested is outside business hours
-            2. Request them to suggest another time during business hours
-            3. Acknowledge and incorporate ALL other instructions (VP attendance, hotel meetings, etc.)
-            4. Keep the tone polite but firm about business hours
-            5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-        else:
-            return f"""
-            You are responding to a complete quotation where the supplier proposed a time OUTSIDE business hours (9 AM - 5 PM IST).
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Explicitly state that the time requested is outside business hours
-            2. Propose and schedule a meeting at the time specified in instructions
-            3. Confirm that a calendar invite will be sent
-            4. Address any other instructions provided
-            5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-    
-    # SCENARIO 5: Partial Quotation + Outside Business Hours
-    elif classification == "Quotation Partially Received" and meeting_scenario == "With time and date but outside business hours":
-        if not is_time_related:
-            return f"""
-            You are responding to a partial quotation where the supplier proposed a time OUTSIDE business hours (9 AM - 5 PM IST).
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Explicitly state that the time requested is outside business hours
-            2. Request them to suggest another time during business hours
-            3. Acknowledge and incorporate ALL other instructions (VP attendance, hotel meetings, etc.)
-            4. Keep the tone professional
-            5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-        else:
-            return f"""
-            You are responding to a partial quotation where the supplier proposed a time OUTSIDE business hours (9 AM - 5 PM IST).
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Explicitly state that the time requested is outside business hours
-            2. Propose a suitable time/date as per the instructions
-            3. Confirm that a calendar invite will be sent
-            4. Address any other instructions provided
-            5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-    
-    # SCENARIO 6: New Business Connection + Outside Business Hours
-    elif classification == "New Business Connection" and meeting_scenario == "With time and date but outside business hours":
-        if not is_time_related:
-            return f"""
-            You are responding to a new business connection where the supplier proposed a time OUTSIDE business hours (9 AM - 5 PM IST).
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Explicitly state that the time requested is outside business hours
-            2. Request them to suggest another time during business hours
-            3. Acknowledge and incorporate ALL other instructions (VP attendance, hotel meetings, etc.)
-            4. Keep the tone welcoming but firm about business hours
-            5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-        else:
-            return f"""
-            You are responding to a new business connection where the supplier proposed a time OUTSIDE business hours (9 AM - 5 PM IST).
-            Instructions: "{instructions}"
-            
-            Your response must:
-            1. Explicitly state that the time requested is outside business hours
-            2. Propose a suitable time/date as per the instructions
-            3. Confirm that a calendar invite will be sent
-            4. Address any other instructions provided
-            5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the meeting-related text to be added.
-            """
-    
-    # SCENARIO 7, 8, 9: Proper mention of time and date within business hours
-    else:  # "Proper mention of time and date and within business hours"
-        return f"""
-        You are responding to a {classification.lower()} where the supplier proposed a proper time within business hours.
-        Instructions: "{instructions}"
-        Meeting Details: {meeting_details}
-        Meeting Result: {meeting_result}
-        
-        Your response should:
-        1. Acknowledge the proposed meeting time
-        2. Address all instructions provided
-        3. Confirm meeting scheduling if appropriate
-        4. Keep the tone professional and positive
-        5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-        
-        Respond ONLY with the meeting-related text to be added.
-        """
 
 def get_meeting_status(meeting_details, meeting_result):
-    """Updated to handle proposal_only status"""
     if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
         return "No Meeting Requested"
-        
     if meeting_result:
         status = meeting_result[1]
         if status == "scheduled":
             return "Meeting Scheduled"
-        elif status == "proposal_only":
-            return "Time Proposed - Awaiting Confirmation"
         elif status == "conflict":
             return "Schedule Conflict"
         elif status == "outside_business_hours":
@@ -1000,61 +783,44 @@ def create_business_connection_table(emails):
 
 
 def send_replies_for_emails(service, calendar_service, emails, df):
-    """
-    Updated function to handle meeting scheduling based on instructions
-    """
     success_count = 0
     error_count = 0
-    
     selected_emails = [(email, row) for email, row in zip(emails, df.itertuples(index=False)) if getattr(row, 'Send')]
-    
     if not selected_emails:
         st.warning("No emails selected to send replies.")
         return
-
     progress_bar = st.progress(0)
     status_text = st.empty()
-
     for i, (email_data, row) in enumerate(selected_emails):
         progress = (i + 1) / len(selected_emails)
         progress_bar.progress(progress)
         status_text.text(f'Sending reply {i + 1} of {len(selected_emails)}...')
-
         instructions = getattr(row, 'Instructions')
         meeting_details = email_data.get('meeting_details', {})
+        # Ensure meeting_result is a tuple with a status
         meeting_result = email_data.get('meeting_result', (None, None))
-
         # Defensive check to ensure meeting_result is a tuple/list with status
         if not isinstance(meeting_result, (tuple, list)) or len(meeting_result) < 2:
             meeting_result = (None, None)
-
-        # UPDATED LOGIC: Only schedule meeting if instructions explicitly say to schedule
-        # Check if instructions contain words that indicate actual scheduling vs just proposing
-        should_schedule_meeting = any(word in instructions.lower() for word in ['schedule', 'book', 'confirm meeting'])
-        should_propose_only = any(word in instructions.lower() for word in ['ask', 'check', 'confirm', 'okay', 'available'])
-
-        if meeting_details.get('meeting_intent') == "Yes" and should_schedule_meeting and not should_propose_only:
-            # Only schedule if explicitly requested to schedule
+        # Check if the email has a meeting intent and needs scheduling
+        if meeting_details.get('meeting_intent') == "Yes" and meeting_result[1] in (
+        None, "outside_business_hours", "no_specific_time"):
             try:
                 ist = pytz.timezone('Asia/Kolkata')
                 current_time_ist = datetime.now(ist).isoformat()
-                
                 prompt = f"""
                 Extract a clear meeting datetime from these instructions. If found, convert to ISO 8601 format in IST.
                 Instructions: "{instructions}"
                 Current Time (IST): {current_time_ist}
                 Respond ONLY with the ISO timestamp or "Not specified" if no time found.
                 """
-                
                 response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3,
                     max_tokens=50
                 )
-                
                 proposed_dt_str = response.choices[0].message.content.strip()
-                
                 if proposed_dt_str != "Not specified":
                     proposed_dt = datetime.fromisoformat(proposed_dt_str)
                     event, status = schedule_meeting(
@@ -1065,18 +831,14 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                         email_data['final_classification']
                     )
                     email_data['meeting_result'] = (event, status)
+                elif meeting_result[1] == "outside_business_hours":
+                    # Retain outside_business_hours status if no new time is provided
+                    email_data['meeting_result'] = (None, "outside_business_hours")
                 else:
                     email_data['meeting_result'] = (None, "no_specific_time")
-                    
             except Exception as e:
                 email_data['meeting_result'] = (None, "parse_error")
                 st.error(f"Error parsing meeting time: {str(e)}")
-                
-        elif should_propose_only:
-            # Don't schedule, just propose - set meeting_result to indicate proposal only
-            email_data['meeting_result'] = (None, "proposal_only")
-
-        # Generate reply body
         reply_body = get_reply_body(
             email_data['final_classification'],
             email_data['quotation_data'],
@@ -1085,8 +847,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             email_data.get('meeting_result', (None, None)),
             instructions
         )
-
-        # Send the reply
         success, message = send_reply(
             service,
             email_data['thread_id'],
@@ -1094,15 +854,12 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             email_data['subject'],
             reply_body
         )
-
         if success:
             success_count += 1
         else:
             error_count += 1
-
     progress_bar.progress(1.0)
     status_text.text('Bulk reply complete!')
-    
     if success_count > 0:
         st.success(f"Successfully sent {success_count} replies!")
     if error_count > 0:
