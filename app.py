@@ -634,14 +634,16 @@ Guidelines:
      - Propose the new time politely and ask for confirmation.
      Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm if this works for you."
    - If instructions contain words like "schedule", "book", "set up", "finalized", "go ahead", "confirm", "proceed":
+     - Schedule the meeting.
      - Confirm the meeting is scheduled.
      - Mention that a calendar invite has been sent.
      Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
+    - Understand the essence of the instruction on whether the meeting is being proposed and they are being asked for confirmation or we are scheduling a meeting and then sending them the invite.
 
 3. Handle meeting_result cases:
    a. If meeting_result is 'scheduled':
-      - If instructions indicate confirmation (e.g., "schedule", "book"), confirm the meeting and mention the calendar invite.
-      - If instructions indicate proposal (e.g., "ask", "suggest"), override and propose the new time without confirming or mentioning an invite.
+      - If instructions indicate confirmation (e.g., "schedule", "book") then, acknowledge, confirm the meeting and mention the calendar invite.
+      - If instructions indicate proposal (e.g., "ask", "suggest"), override, explain politely that we are not able to attend the meeting as per the stated time and propose the new time without confirming or mentioning an invite.
    b. If meeting_result is 'conflict':
       - State the requested slot is unavailable.
       - If instructions provide a new valid time:
@@ -661,6 +663,9 @@ Guidelines:
    d. If meeting_result is 'no_specific_time':
       - State that no clear meeting time was proposed.
       - Ask the sender to suggest a specific date and time.
+      - If instructions provide a new valid time, then state that no clear meeting was proposed and do the following:
+          - If confirmation needed: Propose the new time and ask for confirmation.
+          - If scheduling confirmed: Confirm the new time and mention a calendar invite.
       Example: "We noticed that no specific time was proposed. Could you please share your availability so we can coordinate?"
    e. If meeting_result is 'proposed_for_confirmation':
       - Propose the time from instructions and ask for confirmation.
@@ -679,7 +684,7 @@ Respond ONLY with the text to be inserted in the email (no extra headings or mar
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
+                temperature=0.2,
                 max_tokens=400
             )
             meeting_text = "\n" + response.choices[0].message.content.strip()
