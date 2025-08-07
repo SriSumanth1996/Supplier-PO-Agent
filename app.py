@@ -540,30 +540,39 @@ def schedule_meeting(calendar_service, quotation_data, email_address, proposed_d
         print(f"Error scheduling meeting: {e}")
         return None, "error"
 
-def parse_new_datetime(instructions):
+def parse_new_datetime(instructions, reference_datetime_str=None):
     ist = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist)
+    current_iso = now.isoformat()
+
     prompt = f"""
-    You are a datetime parsing assistant. Extract a proposed meeting datetime from the following instructions.
-    Instructions: {instructions}
-    Current datetime (IST): {now.isoformat()}
-    Task:
-    - Extract a clear datetime in ISO 8601 format (e.g., "2025-08-06T14:30:00+05:30") from the instructions.
-    - Assume Indian Standard Time (IST).
-    - If the date has passed this month, infer the next month.
-    - If no valid datetime is found, return "Not specified".
-    Output: <ISO 8601 timestamp> or "Not specified"
-    """
+You are a smart datetime parser. Your task is to extract a full meeting datetime from the user's instructions.
+
+Instructions: "{instructions}"
+Current datetime (IST): {current_iso}
+Reference datetime (if mentioned earlier in the email): {reference_datetime_str or "None"}
+
+Rules:
+- If the instruction says "same day", assume it refers to the reference datetime.
+- Return the extracted datetime in **ISO 8601 format**, e.g., "2025-09-08T16:30:00+05:30"
+- Assume all times are in Indian Standard Time (IST).
+- If the datetime is vague or incomplete and you can't resolve it even with reference, return "Not specified".
+- Do NOT explain — just return the datetime or "Not specified".
+
+Answer:
+"""
+
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
+            temperature=0.1,
             max_tokens=50
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         return "Not specified"
+
 
 def get_meeting_date_time(meeting_details):
     if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
@@ -887,7 +896,9 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             ist = pytz.timezone('Asia/Kolkata')
             try:
                 # Check instructions FIRST for new time or intent
-                new_time_str = parse_new_datetime(instructions)
+                reference_datetime = meeting_details.get("proposed_datetime", None)
+                new_time_str = parse_new_datetime(instructions, reference_datetime)
+
                 should_schedule = should_schedule_from_instructions(instructions)
                 
                 if instructions.strip() and new_time_str != "Not specified":
