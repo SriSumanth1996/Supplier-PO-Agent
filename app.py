@@ -636,6 +636,32 @@ def get_meeting_date_time(meeting_details):
     except:
         return "Not Specified", "Not Specified"
 
+
+def send_reply(service, thread_id, recipient, subject, body):
+    """
+    Sends a reply to an email using Gmail API.
+    """
+    try:
+        message = MIMEText(body, "plain")
+        message["To"] = recipient
+        message["From"] = "me"  # Uses the authenticated user
+        message["Subject"] = f"Re: {subject}"
+        message["In-Reply-To"] = thread_id
+        message["References"] = thread_id
+
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+        body = {"raw": raw_message, "threadId": thread_id}
+
+        service.users().messages().send(userId="me", body=body).execute()
+        return True, "Reply sent successfully"
+    except Exception as e:
+        return False, str(e)
+
+
+
+
+
+
 def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
     ist = pytz.timezone('Asia/Kolkata')
     if classification == "Quotation Received":
