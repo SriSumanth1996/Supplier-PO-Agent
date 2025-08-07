@@ -622,7 +622,8 @@ Thank you for your email."""
             Instructions from User: "{instructions}"
             Guidelines:
             1. Avoid redundant phrases like "Thank you for your quotation" if already mentioned in the base message.
-            2. If the instruction doesn't mention rescheduling or concerns non-meeting directives, assume the proposed time and date are acceptable and schedule the meeting accordingly.
+            2. If the instruction doesn't mention rescheduling - then assume the proposed time and date are acceptable. Confirm and schedule the meeting as per the slot requested by the sender.
+            3. If the instruction is about aspects not related to meeting, then assume the proposed time and date are acceptable. Confirm and schedule the meeting as per the slot requested by the sender.
             3. For meeting scheduling:
                - If instructions indicate a need for **confirmation** (e.g., words like "ask", "check", "confirm", "whether they are okay", "suggest", "propose"):
                  - Propose the new time politely.
