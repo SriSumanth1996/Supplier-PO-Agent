@@ -645,12 +645,13 @@ Thank you for your email."""
             3. If meeting_result is 'scheduled':
                    - Confirm the meeting time.
                    - Mention that a calendar invite has been sent.
-            4. End the message with a professional closing:
-               'Looking forward to our discussion.'
+            4. End the message with a professional closing as per the flow of the mail. But end with:
                'Best regards,'
                'Dr. Saravanan Kesavan'
                'BITSoM'
             5. Keep tone professional and polite.
+            6. The transition from base message to the next part must be smooth.
+            6. Don't hallucinate but follow all the instructions perfectly.
             Respond ONLY with the text to be inserted in the email (no extra headings or markers).
             """
             response = client.chat.completions.create(
