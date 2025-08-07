@@ -684,7 +684,7 @@ Respond ONLY with the text to be inserted in the email (no extra headings or mar
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
+                temperature=0.1,
                 max_tokens=400
             )
             meeting_text = "\n" + response.choices[0].message.content.strip()
