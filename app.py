@@ -445,6 +445,8 @@ def check_calendar_conflict(calendar_service, start_time, end_time):
     except Exception as e:
         print(f"Error checking calendar conflict: {e}")
         return False, None
+
+        
 def schedule_meeting(calendar_service, quotation_data, email_address, proposed_datetime=None, classification="Unknown"):
     try:
         ist = pytz.timezone('Asia/Kolkata')
@@ -547,6 +549,8 @@ def get_meeting_date_time(meeting_details):
         return date_str, time_str
     except:
         return "Not Specified", "Not Specified"
+
+        
 def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
     ist = pytz.timezone('Asia/Kolkata')
     if classification == "Quotation Received":
@@ -565,9 +569,56 @@ Thank you for your quotation. We have received the full details regarding your p
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your quotation. We have reviewed the information provided, however, we need additional details to complete our evaluation."""
         if missing_items:
-            base_message += f"\n\nPlease provide the following missing information:"
+            base_message += f"
+Please provide the following missing information:"
             for i, item in enumerate(missing_items, 1):
-                base_message += f"\n{i}. {item.title()}"
+                base_message += f"
+{i}. {item.title()}"
+    elif classification == "New Business Connection":
+        base_message = f"""Dear {sender_name or 'Supplier'},
+Thank you for introducing your company and sharing your offerings with us."""
+    else:
+        base_message = f"""Dear {sender_name or 'Supplier'},
+Thank you for your email."""
+
+    meeting_text = ""
+    if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
+        try:
+            prompt = f"""
+            You are a professional email assistant. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
+            Email Classification: {classification}
+            Original Meeting Details: {meeting_details}
+            Meeting Result: {meeting_result}
+            Instructions from User: "{instructions}"
+            Guidelines:
+            1. If meeting_result indicates 'outside_business_hours':
+               - Politely explain the proposed time is outside business hours (9 AM to 5 PM IST).
+               - If instructions provide a new valid time, propose that time and mention a calendar invite will be sent.
+               - Otherwise, ask the recipient to suggest a time within business hours.
+            2. If instructions contain a new meeting time and meeting_result is not 'outside_business_hours':
+               - Politely explain we can't meet at the original time proposed by the supplier and politely check whether they are okay with the new meeting time provided in the instructions.
+               - Propose the new time and mention a calendar invite will be sent.
+            3. If instructions request someone to join (e.g., VP):
+               - Politely request their presence and explain why if a reason is given.
+            4. For other instructions:
+               - Incorporate naturally into the email.
+            5. If meeting_result is 'scheduled', confirm the meeting time.
+            6. Keep tone professional and polite.
+            Respond ONLY with the text to be inserted in the email (no headings or markers).
+            """
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=200
+            )
+            meeting_text = "
+" + response.choices[0].message.content.strip()
+        except Exception as e:
+            meeting_text = f"
+Additional Instructions: {instructions}"
+
+    base_message += meeting_text
     elif classification == "New Business Connection":
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for introducing your company and sharing your offerings with us."""
