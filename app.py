@@ -634,7 +634,7 @@ Thank you for your email."""
                 Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
                 - If meeting_result indicates 'outside_business_hours':
                      - Do not schedule the meeting at the time requested by the sender.
-                     - Politely explain that the proposed time falls outside business hours (9 AM to 5 PM IST).
+                     - Say that the proposed time made by them in the mail falls outside business hours (9 AM to 5 PM IST).
                      - If instructions provide a new valid time:
                          - If confirmation is needed: Propose the new time and ask for confirmation.
                             - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
@@ -656,7 +656,7 @@ Thank you for your email."""
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
+                temperature=0.1,
                 max_tokens=300
             )
             meeting_text = "\n" + response.choices[0].message.content.strip()
