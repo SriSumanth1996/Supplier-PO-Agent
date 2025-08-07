@@ -837,48 +837,74 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         status_text.text(f'Sending reply {i + 1} of {len(selected_emails)}...')
         instructions = getattr(row, 'Instructions')
         meeting_details = email_data.get('meeting_details', {})
-        # Ensure meeting_result is a tuple with a status
         meeting_result = email_data.get('meeting_result', (None, None))
-        # Defensive check to ensure meeting_result is a tuple/list with status
+        
+        # Defensive check
         if not isinstance(meeting_result, (tuple, list)) or len(meeting_result) < 2:
             meeting_result = (None, None)
-        # Check if the email has a meeting intent and needs scheduling
-        if meeting_details.get('meeting_intent') == "Yes" and meeting_result[1] in (
-        None, "outside_business_hours", "no_specific_time"):
-            try:
-                ist = pytz.timezone('Asia/Kolkata')
-                current_time_ist = datetime.now(ist).isoformat()
-                prompt = f"""
-                Extract a clear meeting datetime from these instructions. If found, convert to ISO 8601 format in IST.
-                Instructions: "{instructions}"
-                Current Time (IST): {current_time_ist}
-                Respond ONLY with the ISO timestamp or "Not specified" if no time found.
-                """
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                    max_tokens=50
-                )
-                proposed_dt_str = response.choices[0].message.content.strip()
-                if proposed_dt_str != "Not specified":
-                    proposed_dt = datetime.fromisoformat(proposed_dt_str)
-                    event, status = schedule_meeting(
-                        calendar_service,
-                        email_data['quotation_data'],
-                        email_data['email_address'],
-                        proposed_dt,
-                        email_data['final_classification']
-                    )
-                    email_data['meeting_result'] = (event, status)
-                elif meeting_result[1] == "outside_business_hours":
-                    # Retain outside_business_hours status if no new time is provided
-                    email_data['meeting_result'] = (None, "outside_business_hours")
-                else:
-                    email_data['meeting_result'] = (None, "no_specific_time")
-            except Exception as e:
-                email_data['meeting_result'] = (None, "parse_error")
-                st.error(f"Error parsing meeting time: {str(e)}")
+
+        # --- NEW: Auto-schedule sender-proposed meeting if valid ---
+        if meeting_details.get('meeting_intent') == "Yes":
+            current_status = meeting_result[1]
+
+            # Case 1: No scheduling decision made yet → check if we can auto-schedule sender's time
+            if current_status in (None, "No Meeting Requested"):
+                try:
+                    ist = pytz.timezone('Asia/Kolkata')
+                    proposed_dt_str = meeting_details.get("proposed_datetime")
+
+                    if proposed_dt_str and proposed_dt_str != "Not specified":
+                        proposed_dt = datetime.fromisoformat(proposed_dt_str)
+                        start_time = proposed_dt
+                        end_time = start_time + timedelta(minutes=30)
+
+                        # Check if within business hours (9 AM – 5 PM IST)
+                        if start_time.hour < 9 or start_time.hour >= 17:
+                            email_data['meeting_result'] = (None, "outside_business_hours")
+                        elif start_time < datetime.now(ist):
+                            email_data['meeting_result'] = (None, "past_time")
+                        else:
+                            # Check for calendar conflict
+                            has_conflict, _ = check_calendar_conflict(calendar_service, start_time, end_time)
+                            if has_conflict:
+                                email_data['meeting_result'] = (None, "conflict")
+                            else:
+                                # ✅ Auto-schedule the sender's proposed time
+                                event, status = schedule_meeting(
+                                    calendar_service,
+                                    email_data['quotation_data'],
+                                    email_data['email_address'],
+                                    proposed_dt,
+                                    email_data['final_classification']
+                                )
+                                email_data['meeting_result'] = (event, status)
+                    else:
+                        email_data['meeting_result'] = (None, "no_specific_time")
+                except Exception as e:
+                    email_data['meeting_result'] = (None, "parse_error")
+                    st.error(f"Error parsing sender-proposed time: {str(e)}")
+
+            # Case 2: Conflict/outside hours → try to use new time from instructions
+            elif current_status in ("outside_business_hours", "no_specific_time", "conflict"):
+                try:
+                    proposed_dt_str = parse_new_datetime(instructions)
+                    if proposed_dt_str != "Not specified":
+                        proposed_dt = datetime.fromisoformat(proposed_dt_str)
+                        event, status = schedule_meeting(
+                            calendar_service,
+                            email_data['quotation_data'],
+                            email_data['email_address'],
+                            proposed_dt,
+                            email_data['final_classification']
+                        )
+                        email_data['meeting_result'] = (event, status)
+                    # Else: keep existing status (e.g., still outside hours or conflict)
+                except Exception as e:
+                    email_data['meeting_result'] = (None, "parse_error")
+                    st.error(f"Error parsing instruction time: {str(e)}")
+        # --- End of scheduling logic ---
+
+        # Generate reply body (now with correct meeting_result)
         reply_body = get_reply_body(
             email_data['final_classification'],
             email_data['quotation_data'],
@@ -887,6 +913,8 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             email_data.get('meeting_result', (None, None)),
             instructions
         )
+
+        # Send the reply
         success, message = send_reply(
             service,
             email_data['thread_id'],
@@ -898,6 +926,7 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             success_count += 1
         else:
             error_count += 1
+
     progress_bar.progress(1.0)
     status_text.text('Bulk reply complete!')
     if success_count > 0:
