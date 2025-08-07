@@ -578,7 +578,7 @@ Thank you for introducing your company and sharing your offerings with us."""
     else:
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your email."""
-    
+
     meeting_text = ""
     if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
         try:
@@ -600,47 +600,28 @@ Thank you for your email."""
                - Politely request their presence and explain why if a reason is given.
             4. For other instructions:
                - Incorporate naturally into the email.
-            5. If meeting_result is 'scheduled', confirm the meeting time.
-            6. Keep tone professional and polite.
-            Respond ONLY with the text to be inserted in the email (no headings or markers).
+            5. If meeting_result is 'scheduled', confirm the meeting time and include a line like:
+               'A calendar invite has been sent to ensure all parties are aligned.'
+            6. End the message with a professional closing:
+               'Looking forward to our discussion.'
+               'Best regards,'
+               'Dr. Saravanan Kesavan'
+               'BITSoM'
+            7. Keep tone professional and polite.
+            Respond ONLY with the text to be inserted in the email (no extra headings or markers).
             """
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                max_tokens=200
+                max_tokens=300
             )
             meeting_text = "\n" + response.choices[0].message.content.strip()
         except Exception as e:
             meeting_text = f"\nAdditional Instructions: {instructions}"
 
+    # Now: Let AI generate the full closing including "Best regards"
     base_message += meeting_text
-
-    # Append closing based on classification
-    if classification == "Quotation Received":
-        base_message += """
-Looking forward to your response.
-Best regards,
-Dr. Saravanan Kesavan
-BITSoM"""
-    elif classification == "Quotation Partially Received":
-        base_message += """
-Once we receive the complete information, we will be able to proceed with our evaluation.
-Thank you for your cooperation.
-Best regards,
-Dr. Saravanan Kesavan
-BITSoM"""
-    elif classification == "New Business Connection":
-        base_message += """
-We will keep your information on record and reach out to you when opportunities arise.
-Warm regards,
-Dr. Saravanan Kesavan
-BITSoM"""
-    else:
-        base_message += """
-Best regards,
-Dr. Saravanan Kesavan
-BITSoM"""
 
     return base_message
 
