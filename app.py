@@ -628,38 +628,56 @@ Thank you for your email."""
     meeting_text = ""
     if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
         try:
-            # Updated prompt with better instructions for meeting handling
-            prompt = f"""
-            You are a professional email assistant. Based on the context and instructions, generate appropriate meeting-related text for a business email.
+            # Check if meeting result indicates outside business hours
+            meeting_status = meeting_result[1] if meeting_result and len(meeting_result) > 1 else None
             
-            Email Classification: {classification}
-            Original Meeting Details: {meeting_details}
-            Meeting Result: {meeting_result}
-            Instructions from User: "{instructions}"
-            
-            Guidelines:
-            1. AVOID redundant phrases like "Thank you for your quotation" if already mentioned in the base message.
-            2. For meeting scheduling:
-               - If instructions contain words such as "ask", "check", "confirm", or "whether they are okay" (indicating a need for confirmation): 
-                  Propose the suggested time and request confirmation. Do not state that a calendar invite has been sent.
-                  Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm if this works for you."
-               - If instructions contain words like "schedule" or "book" (indicating a confirmed action):
-                 CONFIRM the meeting is scheduled and mention that a calendar invite has been sent.
-                  Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
-               - If meeting_result indicates 'outside_business_hours': 
-                 - Do not schedule the meeting at the time proposed by the sender.
-                 - Politely explain that the proposed time falls outside business hours (9 AM to 5 PM IST).
-                 - If instructions provide a new valid time, propose that time and mention a calendar invite will be sent:
-                     - If confirmation is needed: Propose the new time and ask for confirmation.
-                     - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
-            3. If meeting_result is 'scheduled': 
-               Confirm the meeting time and state that a calendar invite has been sent.
-            4. Keep responses concise and professional
-            5. For any meeting-related content—whether scheduling, proposing, or confirming—end the message with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            6. For any non-meeting-related content, end the message with: 'Looking forward.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
-            
-            Respond ONLY with the text to be added (no extra headings or markers).
-            """
+            if meeting_status == "outside_business_hours":
+                # Handle outside business hours case
+                prompt = f"""
+                You are a professional email assistant. The sender proposed a meeting time that falls outside business hours (9 AM - 5 PM IST).
+                
+                Email Classification: {classification}
+                Original Meeting Details: {meeting_details}
+                Meeting Result: {meeting_result}
+                Instructions from User: "{instructions}"
+                
+                Guidelines:
+                1. Politely decline the proposed time because it's outside business hours (9 AM - 5 PM IST)
+                2. If instructions contain specific alternative times, propose those times and ask for confirmation
+                3. If NO specific alternative time is provided in instructions, suggest 2-3 business hour options (e.g., "10:00 AM", "2:00 PM", "4:00 PM")
+                4. Include any special requests from instructions (like "department heads to join")
+                5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
+                6. Keep response professional and concise
+                
+                Respond ONLY with the meeting-related text to be added.
+                """
+            else:
+                # Original prompt for other cases
+                prompt = f"""
+                You are a professional email assistant. Based on the context and instructions, generate appropriate meeting-related text for a business email.
+                
+                Email Classification: {classification}
+                Original Meeting Details: {meeting_details}
+                Meeting Result: {meeting_result}
+                Instructions from User: "{instructions}"
+                
+                Guidelines:
+                1. AVOID redundant phrases like "Thank you for your quotation" if already mentioned in the base message.
+                2. For meeting scheduling:
+                   - If instructions contain words such as "ask", "check", "confirm", or "whether they are okay" (indicating a need for confirmation): 
+                      Propose the suggested time and request confirmation. Do not state that a calendar invite has been sent.
+                      Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm if this works for you."
+                   - If instructions contain words like "schedule" or "book" (indicating a confirmed action):
+                     CONFIRM the meeting is scheduled and mention that a calendar invite has been sent.
+                      Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
+                3. If meeting_result is 'scheduled': 
+                   Confirm the meeting time and state that a calendar invite has been sent.
+                4. Keep responses concise and professional
+                5. For any meeting-related content—whether scheduling, proposing, or confirming—end the message with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
+                6. For any non-meeting-related content, end the message with: 'Looking forward.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
+                
+                Respond ONLY with the text to be added (no extra headings or markers).
+                """
             
             response = client.chat.completions.create(
                 model="gpt-4o",
