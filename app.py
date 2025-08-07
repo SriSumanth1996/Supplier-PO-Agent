@@ -435,99 +435,111 @@ def calculate_total_cost_if_missing(quotation_data):
     return quotation_data
 
 
-def send_replies_for_emails(service, calendar_service, emails, df):
-    success_count = 0
-    error_count = 0
-    selected_emails = [(email, row) for email, row in zip(emails, df.itertuples(index=False)) if getattr(row, 'Send')]
-    if not selected_emails:
-        st.warning("No emails selected to send replies.")
-        return
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    for i, (email_data, row) in enumerate(selected_emails):
-        progress = (i + 1) / len(selected_emails)
-        progress_bar.progress(progress)
-        status_text.text(f'Sending reply {i + 1} of {len(selected_emails)}...')
-        instructions = getattr(row, 'Instructions')
-        meeting_details = email_data.get('meeting_details', {})
-        meeting_result = email_data.get('meeting_result', (None, None))
-        if not isinstance(meeting_result, (tuple, list)) or len(meeting_result) < 2:
-            meeting_result = (None, None)
+def send_reply(service, thread_id, to_email, subject, body):
+    message = MIMEText(body)
+    message['to'] = to_email
+    message['subject'] = f"Re: {subject}"
+    raw = b64.urlsafe_b64encode(message.as_bytes()).decode()
+    message = {
+        'raw': raw,
+        'threadId': thread_id
+    }
+    try:
+        sent = service.users().messages().send(userId="me", body=message).execute()
+        return True, f"Reply sent to {to_email}"
+    except Exception as e:
+        return False, f"Error sending reply: {e}"
 
-        # Handle meeting scheduling
-        if meeting_details.get('meeting_intent') == "Yes" and meeting_result[1] in (
-                None, "outside_business_hours", "no_specific_time"):
-            try:
-                ist = pytz.timezone('Asia/Kolkata')
-                current_time_ist = datetime.now(ist)
-                proposed_dt_str = None
-                # First, try to get a new datetime from instructions
-                if instructions.strip():
-                    prompt = f"""
-                    Extract a clear meeting datetime from these instructions. If found, convert to ISO 8601 format in IST.
-                    Instructions: "{instructions}"
-                    Current Time (IST): {current_time_ist.isoformat()}
-                    Respond ONLY with the ISO timestamp or "Not specified" if no time found.
-                    """
-                    response = client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0.3,
-                        max_tokens=50
-                    )
-                    proposed_dt_str = response.choices[0].message.content.strip()
-                
-                # If no new time in instructions, use the original proposed datetime
-                if proposed_dt_str == "Not specified" and meeting_details.get('proposed_datetime') != "Not specified":
-                    proposed_dt_str = meeting_details['proposed_datetime']
-                
-                if proposed_dt_str != "Not specified":
-                    proposed_dt = datetime.fromisoformat(proposed_dt_str)
-                    # Check if the time is valid (not in the past and within business hours)
-                    if proposed_dt < current_time_ist:
-                        email_data['meeting_result'] = (None, "past_time")
-                    elif proposed_dt.hour < 9 or proposed_dt.hour >= 17:
-                        email_data['meeting_result'] = (None, "outside_business_hours")
-                    else:
-                        event, status = schedule_meeting(
-                            calendar_service,
-                            email_data['quotation_data'],
-                            email_data['email_address'],
-                            proposed_dt,
-                            email_data['final_classification']
-                        )
-                        email_data['meeting_result'] = (event, status)
-                else:
-                    email_data['meeting_result'] = (None, "no_specific_time")
-            except Exception as e:
-                email_data['meeting_result'] = (None, "parse_error")
-                st.error(f"Error parsing meeting time: {str(e)}")
-        
-        reply_body = get_reply_body(
-            email_data['final_classification'],
-            email_data['quotation_data'],
-            email_data['quotation_data'].get('sender_name'),
-            meeting_details,
-            email_data.get('meeting_result', (None, None)),
-            instructions
-        )
-        success, message = send_reply(
-            service,
-            email_data['thread_id'],
-            email_data['email_address'],
-            email_data['subject'],
-            reply_body
-        )
-        if success:
-            success_count += 1
+
+def check_calendar_conflict(calendar_service, start_time, end_time):
+    try:
+        events_result = calendar_service.events().list(
+            calendarId='primary',
+            timeMin=start_time.isoformat(),
+            timeMax=end_time.isoformat(),
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        events = events_result.get('items', [])
+        for event in events:
+            event_start = datetime.fromisoformat(
+                event['start'].get('dateTime', event['start'].get('date')).replace('Z', '+00:00'))
+            event_end = datetime.fromisoformat(
+                event['end'].get('dateTime', event['end'].get('date')).replace('Z', '+00:00'))
+            if not (end_time <= event_start or start_time >= event_end):
+                return True, event.get('summary', 'Existing meeting')
+        return False, None
+    except Exception as e:
+        print(f"Error checking calendar conflict: {e}")
+        return False, None
+
+
+def schedule_meeting(calendar_service, quotation_data, email_address, proposed_datetime=None, classification="Unknown"):
+    try:
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        if proposed_datetime:
+            start_hour = proposed_datetime.hour
+            if start_hour < 9 or start_hour >= 17:
+                return None, "outside_business_hours"
+            if proposed_datetime < now:
+                return None, "past_time"
+            end_time = proposed_datetime + timedelta(minutes=30)
+            has_conflict, conflicting_event = check_calendar_conflict(calendar_service, proposed_datetime, end_time)
+            if has_conflict:
+                return None, "conflict"
         else:
-            error_count += 1
-    progress_bar.progress(1.0)
-    status_text.text('Bulk reply complete!')
-    if success_count > 0:
-        st.success(f"Successfully sent {success_count} replies!")
-    if error_count > 0:
-        st.error(f"Failed to send {error_count} replies.")
+            return None, "no_specific_time"
+        company_name = quotation_data.get('company_name', 'Unknown Company')
+        if company_name == "Not present":
+            company_name = "Unknown Company"
+        if classification == "New Business Connection":
+            description = f"""
+            Meeting to discuss potential business collaboration with {company_name}.
+            Contact: {quotation_data.get('sender_name', 'Not present')} ({quotation_data.get('contact_number', 'Not present')})
+            Designation: {quotation_data.get('designation', 'Not present')}
+            Location: {quotation_data.get('place', 'Not present')}
+            Email: {email_address}
+            """
+        else:
+            description = f"""
+            Meeting to discuss quotation for {quotation_data.get('product', 'Unknown Product')}.
+            Quantity: {quotation_data.get('quantity', 'Not present')}
+            Unit Price: {quotation_data.get('unit_price', 'Not present')}
+            Total Cost: {quotation_data.get('total_cost', 'Not present')}
+            Lead Time: {quotation_data.get('lead_time', 'Not present')}
+            Contact: {quotation_data.get('sender_name', 'Not present')} ({quotation_data.get('contact_number', 'Not present')})
+            Location: {quotation_data.get('place', 'Not present')}
+            Email: {email_address}
+            """
+        event = {
+            'summary': f"Supplier Meeting: {company_name}",
+            'description': description,
+            'start': {
+                'dateTime': proposed_datetime.isoformat(),
+                'timeZone': 'Asia/Kolkata',
+            },
+            'end': {
+                'dateTime': end_time.isoformat(),
+                'timeZone': 'Asia/Kolkata',
+            },
+            'attendees': [
+                {'email': email_address},
+                {'email': 'srivenkatasumanthpisapati@gmail.com'}
+            ],
+            'reminders': {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'email', 'minutes': 24 * 60},
+                    {'method': 'popup', 'minutes': 10},
+                ],
+            },
+        }
+        event = calendar_service.events().insert(calendarId='primary', body=event, sendUpdates='all').execute()
+        return event, "scheduled"
+    except Exception as e:
+        print(f"Error scheduling meeting: {e}")
+        return None, "error"
 
 
 def parse_new_datetime(instructions):
@@ -603,48 +615,49 @@ Thank you for your email."""
     if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
         try:
             prompt = f"""
-            You are a professional email assistant for creating responses to suppliers for quotations or business connections. Based on the following context and instructions, generate appropriate meeting-related text and incorporate any additional instructions for a business email.
+            You are a professional email assistant for the case of creating responses to suppliers who come for quotations. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
             Email Classification: {classification}
             Original Meeting Details: {meeting_details}
             Meeting Result: {meeting_result}
             Instructions from User: "{instructions}"
             Guidelines:
             1. Avoid redundant phrases like "Thank you for your quotation" if already mentioned in the base message.
-            2. If the instruction doesn't mention rescheduling, assume the proposed time and date are acceptable. Confirm and schedule the meeting as per the slot requested by the sender.
-            3. If the instruction is about aspects not related to meeting (e.g., "Ask them to share their flyer"), include the request in the response.
-            4. For meeting scheduling:
+            2. If the instruction doesn't mention rescheduling - then assume the proposed time and date are acceptable. Confirm and schedule the meeting as per the slot requested by the sender.
+            3. If the instruction is about aspects not related to meeting, then assume the proposed time and date are acceptable. Confirm and schedule the meeting as per the slot requested by the sender.
+            3. For meeting scheduling:
                - If instructions indicate a need for **confirmation** (e.g., words like "ask", "check", "confirm", "whether they are okay", "suggest", "propose"):
                  - Propose the new time politely.
                  - Ask for confirmation.
                  - Do **not** mention that a calendar invite has been sent.
                 Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm if this works for you."
-               - If instructions indicate a **confirmed action** (e.g., words like "schedule", "book", "set up", "go ahead", "finalized") or no rescheduling is mentioned:
+               - If instructions indicate a **confirmed action** (e.g., words like "schedule", "book", "set up", "go ahead", "finalized"):
                  - Confirm the meeting is scheduled.
                  - Mention that a calendar invite has been sent.
                 Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
-               - If meeting_result indicates 'outside_business_hours':
-                 - Do not schedule the meeting at the requested time.
-                 - State that the proposed time falls outside business hours (9 AM to 5 PM IST).
+                - If meeting_result indicates 'outside_business_hours':
+                     - Do not schedule the meeting at the time requested by the sender.
+                     - Say that the proposed time falls outside business hours (9 AM to 5 PM IST).
+                     - If instructions provide a new valid time:
+                         - If confirmation is needed: Propose the new time and ask for confirmation.
+                         - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
+                     - If no alternative time is provided, request the recipient to suggest a time within business hours.
+                     - If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
+                        These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
+            4. If meeting_result is 'scheduled':
+                   - Confirm the meeting time.
+                   - Mention that a calendar invite has been sent.
+            5. If meeting_result is "conflict":
+                 - Say that the requested slot is not available.
                  - If instructions provide a new valid time:
-                     - If confirmation is needed: Propose the new time and ask for confirmation.
-                     - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
-                 - If no alternative time is provided, request the recipient to suggest a time within business hours.
-                 - If instructions include other requests (e.g., "Ask their departmental heads to join the meeting"), address them regardless of scheduling issues.
-            5. If meeting_result is 'scheduled':
-               - Confirm the meeting time.
-               - Mention that a calendar invite has been sent.
-            6. If meeting_result is "conflict":
-               - State that the requested slot is not available.
-               - If instructions provide a new valid time:
-                  - If confirmation is needed: Propose the new time and ask for confirmation.
-                  - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
-               - Address any additional instructions (e.g., "Ask their departmental heads to join the meeting").
-            7. Include any additional instructions (e.g., "Ask them to share their flyer") in the response, ensuring they are professionally worded.
-            8. End the message with a professional closing as per the mail with the following signature:
+                    - If confirmation is needed: Propose the new time and ask for confirmation.
+                    - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
+                 -  If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
+                    These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
+            6. End the message with a professional closing as per the mail with the following signature:
                'Best regards,'
                'Dr. Saravanan Kesavan'
                'BITSoM'
-            9. Keep tone professional and polite.
+            7. Keep tone professional and polite.
             Respond ONLY with the text to be inserted in the email (no extra headings or markers).
             """
             response = client.chat.completions.create(
@@ -657,7 +670,9 @@ Thank you for your email."""
         except Exception as e:
             meeting_text = f"\nAdditional Instructions: {instructions}"
 
+    # Now: Let AI generate the full closing including "Best regards"
     base_message += meeting_text
+
     return base_message
 
 
@@ -782,21 +797,6 @@ def create_business_connection_table(emails):
     df = pd.DataFrame(data)
     return df
 
-def send_reply(service, thread_id, to_email, subject, body):
-    message = MIMEText(body)
-    message['to'] = to_email
-    message['subject'] = f"Re: {subject}"
-    raw = b64.urlsafe_b64encode(message.as_bytes()).decode()
-    message = {
-        'raw': raw,
-        'threadId': thread_id
-    }
-    try:
-        sent = service.users().messages().send(userId="me", body=message).execute()
-        return True, f"Reply sent to {to_email}"
-    except Exception as e:
-        return False, f"Error sending reply: {e}"
-
 
 def send_replies_for_emails(service, calendar_service, emails, df):
     success_count = 0
@@ -829,8 +829,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                 Instructions: "{instructions}"
                 Current Time (IST): {current_time_ist}
                 Respond ONLY with the ISO timestamp or "Not specified" if no time found.
-                If the instruction doesn't mention rescheduling - then assume the proposed time and date are acceptable. Confirm and schedule the meeting as per the slot requested by the sender.
-                If the instruction is about aspects not related to meeting, then assume the proposed time and date are acceptable. Confirm and schedule the meeting as per the slot requested by the sender.
                 """
                 response = client.chat.completions.create(
                     model="gpt-4o",
