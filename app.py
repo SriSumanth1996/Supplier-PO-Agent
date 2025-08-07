@@ -327,9 +327,14 @@ def extract_meeting_details(context):
     current_ist_iso = now_ist.isoformat()
     prompt = f"""
     You are an intelligent meeting scheduling assistant. Analyze the email below and determine:
-    1. Did the sender express intent to set up a meeting? (Yes/No)
+    1.Determine if the sender intends to set up a meeting. Reply with "Yes" or "No".
     2. Is a specific date/time mentioned? If yes, convert to ISO 8601 format (IST).
-    3. Who proposed the meeting time? Choose one:
+    3. If yes, infer the proposed date and time, even if partial (e.g., "6th at 4PM", "Monday morning").
+       - Convert into a full datetime string in ISO 8601 format (e.g., "2025-08-06T16:00:00+05:30").
+       - Assume Indian Standard Time (IST).
+       - If the date (e.g., "6th") has already passed this month, infer the next month.
+       - Use the provided current datetime to resolve relative references.
+    4. Who proposed the meeting time? Choose one:
        - "sender": if the sender suggests a time (e.g., "Let's meet on 8th at 2 PM")
        - "recipient": if the recipient (you) is asked to suggest a time (e.g., "Please let me know your availability")
        - "mutual": if both parties are discussing options
@@ -638,8 +643,7 @@ Guidelines:
      - Confirm the meeting is scheduled.
      - Mention that a calendar invite has been sent.
      Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
-    - Understand the essence of the instruction on whether the meeting is being proposed and they are being asked for confirmation or we are scheduling a meeting and then sending them the invite.
-
+    - Understand the intent behind the instruction: whether we are proposing a meeting and seeking confirmation, or confirming a meeting that has already been scheduled and inviting them.
 3. Handle meeting_result cases:
    a. If meeting_result is 'scheduled':
       - If instructions indicate confirmation (e.g., "schedule", "book") then, acknowledge, confirm the meeting and mention the calendar invite.
@@ -678,6 +682,7 @@ Guidelines:
    BITSoM
 
 5. Keep tone professional and polite.
+6. Don't hallucinate or give replies based on examples. Understand the essence and proceed.
 
 Respond ONLY with the text to be inserted in the email (no extra headings or markers).
 """
