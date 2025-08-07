@@ -634,19 +634,24 @@ Thank you for your email."""
                 Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
                 - If meeting_result indicates 'outside_business_hours':
                      - Do not schedule the meeting at the time requested by the sender.
-                     - Politely explain that the proposed time falls outside business hours (9 AM to 5 PM IST).
+                     - Say that the proposed time falls outside business hours (9 AM to 5 PM IST).
                      - If instructions provide a new valid time:
                          - If confirmation is needed: Propose the new time and ask for confirmation.
-                            - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
+                         - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
                      - If no alternative time is provided, request the recipient to suggest a time within business hours.
                      - If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
                         These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
-
             3. If meeting_result is 'scheduled':
                    - Confirm the meeting time.
                    - Mention that a calendar invite has been sent.
-            4. End the message with a professional closing:
-               'Looking forward to our discussion.'
+            4. If meeting_result is "conflict":
+                 - Say that the requested slot is not available.
+                 - If instructions provide a new valid time:
+                    - If confirmation is needed: Propose the new time and ask for confirmation.
+                    - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
+                 -  If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
+                    These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
+            4. End the message with a professional closing as per the mail with the following signature:
                'Best regards,'
                'Dr. Saravanan Kesavan'
                'BITSoM'
@@ -657,7 +662,7 @@ Thank you for your email."""
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                max_tokens=300
+                max_tokens=350
             )
             meeting_text = "\n" + response.choices[0].message.content.strip()
         except Exception as e:
