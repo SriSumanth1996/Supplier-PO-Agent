@@ -614,87 +614,45 @@ Thank you for your email."""
     meeting_text = ""
     if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
         try:
-            # First, determine the intent of the instructions
-            intent_analysis_prompt = f"""
-            Analyze the user's instruction to understand their intent regarding meeting scheduling.
-            
-            User Instructions: "{instructions}"
-            Meeting Context: They originally proposed a meeting, and now the user wants to respond.
-            
-            Determine the user's intent:
-            1. SCHEDULE_DIRECT - User wants to directly confirm/book a meeting at a specific time
-            2. ASK_AVAILABILITY - User wants to propose a time and ask if the recipient is available
-            3. OTHER - Instructions are about something else entirely
-            
-            Consider:
-            - Tone (definitive vs tentative)
-            - Language patterns (commands vs questions vs suggestions)
-            - Context clues about certainty vs inquiry
-            
-            Examples:
-            - "Schedule meeting for 3 PM" → SCHEDULE_DIRECT
-            - "Ask if 3 PM works" → ASK_AVAILABILITY  
-            - "See if they're free at 3 PM" → ASK_AVAILABILITY
-            - "Book it for 3 PM" → SCHEDULE_DIRECT
-            - "Push it to 3 PM" → ASK_AVAILABILITY (pushing implies negotiation)
-            - "Meeting confirmed for 3 PM" → SCHEDULE_DIRECT
-            - "Ask their department heads to join" → OTHER
-            
-            Respond with only: SCHEDULE_DIRECT, ASK_AVAILABILITY, or OTHER
-            """
-            
-            intent_response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": intent_analysis_prompt}],
-                temperature=0.1,
-                max_tokens=20
-            )
-            
-            user_intent = intent_response.choices[0].message.content.strip()
-            
             prompt = f"""
-            You are a professional email assistant for supplier quotation responses. Generate appropriate meeting-related text based on the analyzed intent.
-            
+            You are a professional email assistant for the case of creating responses to suppliers who come for quotations. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
             Email Classification: {classification}
             Original Meeting Details: {meeting_details}
             Meeting Result: {meeting_result}
-            User Instructions: "{instructions}"
-            Determined Intent: {user_intent}
-            
-            RESPONSE LOGIC:
-            
-            If Intent is ASK_AVAILABILITY:
-            - Propose the time/change mentioned in instructions
-            - Ask for their confirmation/availability
-            - Use polite, inquiry-based language
-            - DO NOT mention calendar invites being sent
-            - Example: "Would you be available for a meeting on [date] at [time] IST instead? Please confirm if this works for you."
-            
-            If Intent is SCHEDULE_DIRECT:
-            - Confirm the meeting is scheduled
-            - State the definitive time
-            - Mention that a calendar invite has been sent
-            - Example: "The meeting has been scheduled for [date] at [time] IST. A calendar invite has been sent."
-            
-            If Intent is OTHER:
-            - Address the specific request in instructions
-            - Handle meeting context appropriately based on existing meeting_result
-            
-            SPECIAL CASES:
-            - If meeting_result status is 'outside_business_hours': Explain the time falls outside 9 AM-5 PM IST
-            - If meeting_result status is 'scheduled': Always confirm the meeting regardless of intent
-            - If meeting_result status is 'conflict': Mention scheduling conflict
-            
-            Always end with:
-            "Looking forward to our discussion.
-            
-            Best regards,
-            Dr. Saravanan Kesavan
-            BITSoM"
-            
-            Respond ONLY with the meeting-related text to be added to the email.
+            Instructions from User: "{instructions}"
+            Guidelines:
+            1. Avoid redundant phrases like "Thank you for your quotation" if already mentioned in the base message.
+            2. For meeting scheduling:
+               - If instructions indicate a need for **confirmation** (e.g., words like "ask", "check", "confirm", "whether they are okay", "suggest", "propose"):
+                 - Propose the new time politely.
+                 - Ask for confirmation.
+                 - Do **not** mention that a calendar invite has been sent.
+                Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm if this works for you."
+               - If instructions indicate a **confirmed action** (e.g., words like "schedule", "book", "set up", "go ahead", "finalized"):
+                 - Confirm the meeting is scheduled.
+                 - Mention that a calendar invite has been sent.
+                Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
+                - If meeting_result indicates 'outside_business_hours':
+                     - Do not schedule the meeting at the time requested by the sender.
+                     - Politely explain that the proposed time falls outside business hours (9 AM to 5 PM IST).
+                     - If instructions provide a new valid time:
+                         - If confirmation is needed: Propose the new time and ask for confirmation.
+                            - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
+                     - If no alternative time is provided, request the recipient to suggest a time within business hours.
+                     - If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
+                        These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
+
+            3. If meeting_result is 'scheduled':
+                   - Confirm the meeting time.
+                   - Mention that a calendar invite has been sent.
+            4. End the message with a professional closing:
+               'Looking forward to our discussion.'
+               'Best regards,'
+               'Dr. Saravanan Kesavan'
+               'BITSoM'
+            5. Keep tone professional and polite.
+            Respond ONLY with the text to be inserted in the email (no extra headings or markers).
             """
-            
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
@@ -705,9 +663,10 @@ Thank you for your email."""
         except Exception as e:
             meeting_text = f"\nAdditional Instructions: {instructions}"
 
+    # Now: Let AI generate the full closing including "Best regards"
     base_message += meeting_text
-    return base_message
 
+    return base_message
 
 
 def get_meeting_status(meeting_details, meeting_result):
@@ -836,82 +795,40 @@ def send_replies_for_emails(service, calendar_service, emails, df):
     success_count = 0
     error_count = 0
     selected_emails = [(email, row) for email, row in zip(emails, df.itertuples(index=False)) if getattr(row, 'Send')]
-    
     if not selected_emails:
         st.warning("No emails selected to send replies.")
         return
-    
     progress_bar = st.progress(0)
     status_text = st.empty()
-    
     for i, (email_data, row) in enumerate(selected_emails):
         progress = (i + 1) / len(selected_emails)
         progress_bar.progress(progress)
         status_text.text(f'Sending reply {i + 1} of {len(selected_emails)}...')
-        
         instructions = getattr(row, 'Instructions')
         meeting_details = email_data.get('meeting_details', {})
+        # Ensure meeting_result is a tuple with a status
         meeting_result = email_data.get('meeting_result', (None, None))
-        
         # Defensive check to ensure meeting_result is a tuple/list with status
         if not isinstance(meeting_result, (tuple, list)) or len(meeting_result) < 2:
             meeting_result = (None, None)
-        
-        # AI-DRIVEN INTENT ANALYSIS: Let AI determine if we should schedule or just ask
-        should_schedule = False
-        if meeting_details.get('meeting_intent') == "Yes" and instructions.strip():
-            try:
-                intent_prompt = f"""
-                Analyze the following instruction to determine the user's intent regarding meeting scheduling.
-                
-                Instruction: "{instructions}"
-                
-                Determine if the user wants to:
-                A) SCHEDULE - Directly book/confirm a meeting (definitive action)
-                B) ASK - Propose a time and ask for confirmation (tentative inquiry)
-                
-                Consider the tone, language, and phrasing. Look for:
-                - Definitive vs tentative language
-                - Direct commands vs polite inquiries
-                - Certainty vs uncertainty in phrasing
-                
-                Respond with only "SCHEDULE" or "ASK"
-                """
-                
-                intent_response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[{"role": "user", "content": intent_prompt}],
-                    temperature=0.1,
-                    max_tokens=10
-                )
-                
-                intent = intent_response.choices[0].message.content.strip()
-                should_schedule = (intent == "SCHEDULE") or meeting_result[1] == "scheduled"
-                
-            except Exception as e:
-                # Fallback: default to asking for confirmation to be safe
-                should_schedule = False
-        
-        # Only attempt to actually schedule meeting if AI determined SCHEDULE intent
-        if should_schedule and meeting_result[1] in (None, "outside_business_hours", "no_specific_time"):
+        # Check if the email has a meeting intent and needs scheduling
+        if meeting_details.get('meeting_intent') == "Yes" and meeting_result[1] in (
+        None, "outside_business_hours", "no_specific_time"):
             try:
                 ist = pytz.timezone('Asia/Kolkata')
                 current_time_ist = datetime.now(ist).isoformat()
-                
                 prompt = f"""
                 Extract a clear meeting datetime from these instructions. If found, convert to ISO 8601 format in IST.
                 Instructions: "{instructions}"
                 Current Time (IST): {current_time_ist}
                 Respond ONLY with the ISO timestamp or "Not specified" if no time found.
                 """
-                
                 response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3,
                     max_tokens=50
                 )
-                
                 proposed_dt_str = response.choices[0].message.content.strip()
                 if proposed_dt_str != "Not specified":
                     proposed_dt = datetime.fromisoformat(proposed_dt_str)
@@ -931,8 +848,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             except Exception as e:
                 email_data['meeting_result'] = (None, "parse_error")
                 st.error(f"Error parsing meeting time: {str(e)}")
-        
-        # Generate reply body (this will now properly handle confirmation vs scheduling)
         reply_body = get_reply_body(
             email_data['final_classification'],
             email_data['quotation_data'],
@@ -941,7 +856,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             email_data.get('meeting_result', (None, None)),
             instructions
         )
-        
         success, message = send_reply(
             service,
             email_data['thread_id'],
@@ -949,19 +863,17 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             email_data['subject'],
             reply_body
         )
-        
         if success:
             success_count += 1
         else:
             error_count += 1
-    
     progress_bar.progress(1.0)
     status_text.text('Bulk reply complete!')
-    
     if success_count > 0:
         st.success(f"Successfully sent {success_count} replies!")
     if error_count > 0:
         st.error(f"Failed to send {error_count} replies.")
+
 
 def display_classification_tables(processed_emails):
     if not processed_emails:
