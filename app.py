@@ -639,8 +639,9 @@ Thank you for your email."""
                          - If confirmation is needed: Propose the new time and ask for confirmation.
                             - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
                      - If no alternative time is provided, request the recipient to suggest a time within business hours.
-                     - If the instructions provide some other aspects, then they are independent.
-                       Eg: If the meeting is outside business hours as they said 8PM.Then in instructions if I say "Ask their departmental heads to join", then it is independent
+                     - If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
+                        These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
+
             3. If meeting_result is 'scheduled':
                    - Confirm the meeting time.
                    - Mention that a calendar invite has been sent.
