@@ -829,6 +829,8 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                 Instructions: "{instructions}"
                 Current Time (IST): {current_time_ist}
                 Respond ONLY with the ISO timestamp or "Not specified" if no time found.
+                If the instruction doesn't mention rescheduling - then assume the proposed time and date are acceptable. Confirm and schedule the meeting as per the slot requested by the sender.
+                If the instruction is about aspects not related to meeting, then assume the proposed time and date are acceptable. Confirm and schedule the meeting as per the slot requested by the sender.
                 """
                 response = client.chat.completions.create(
                     model="gpt-4o",
