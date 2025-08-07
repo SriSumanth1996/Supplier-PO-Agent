@@ -640,16 +640,23 @@ Thank you for your email."""
             Guidelines:
             1. AVOID redundant phrases like "Thank you for your quotation" if already mentioned in the base message.
             2. For meeting scheduling:
-               - If instructions mention "ask", "check", "confirm", or "whether they are okay": 
-                 PROPOSE the time and ASK for confirmation (do not mention calendar invite being sent)
-               - If instructions mention "schedule" or "book": 
-                 CONFIRM the meeting is scheduled and mention calendar invite
+               - If instructions contain words such as "ask", "check", "confirm", or "whether they are okay" (indicating a need for confirmation): 
+                  Propose the suggested time and request confirmation. Do not state that a calendar invite has been sent.
+                  Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm if this works for you."
+               - If instructions contain words like "schedule" or "book" (indicating a confirmed action):
+                 CONFIRM the meeting is scheduled and mention that a calendar invite has been sent.
+                  Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
                - If meeting_result indicates 'outside_business_hours': 
-                 Explain the proposed time is outside business hours (9 AM to 5 PM IST)
+                 - Do not schedule the meeting at the time proposed by the sender.
+                 - Politely explain that the proposed time falls outside business hours (9 AM to 5 PM IST).
+                 - If instructions provide a new valid time, propose that time and mention a calendar invite will be sent:
+                     - If confirmation is needed: Propose the new time and ask for confirmation.
+                     - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
             3. If meeting_result is 'scheduled': 
-               Confirm the meeting time and mention calendar invite has been sent
+               Confirm the meeting time and state that a calendar invite has been sent.
             4. Keep responses concise and professional
-            5. End with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
+            5. For any meeting-related content—whether scheduling, proposing, or confirming—end the message with: 'Looking forward to our discussion.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
+            6. For any non-meeting-related content, end the message with: 'Looking forward.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM'
             
             Respond ONLY with the text to be added (no extra headings or markers).
             """
