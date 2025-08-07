@@ -859,8 +859,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         
         # AI-DRIVEN INTENT ANALYSIS: Let AI determine if we should schedule or just ask
         should_schedule = False
-        user_intent = "ASK"  # Default to asking unless determined otherwise
-        
         if meeting_details.get('meeting_intent') == "Yes" and instructions.strip():
             try:
                 intent_prompt = f"""
@@ -887,16 +885,15 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                     max_tokens=10
                 )
                 
-                user_intent = intent_response.choices[0].message.content.strip()
-                should_schedule = (user_intent == "SCHEDULE") or meeting_result[1] == "scheduled"
+                intent = intent_response.choices[0].message.content.strip()
+                should_schedule = (intent == "SCHEDULE") or meeting_result[1] == "scheduled"
                 
             except Exception as e:
                 # Fallback: default to asking for confirmation to be safe
-                user_intent = "ASK"
                 should_schedule = False
         
         # Only attempt to actually schedule meeting if AI determined SCHEDULE intent
-        if user_intent == "SCHEDULE" and meeting_result[1] in (None, "outside_business_hours", "no_specific_time"):
+        if should_schedule and meeting_result[1] in (None, "outside_business_hours", "no_specific_time"):
             try:
                 ist = pytz.timezone('Asia/Kolkata')
                 current_time_ist = datetime.now(ist).isoformat()
