@@ -625,9 +625,12 @@ def should_schedule_from_instructions(instructions):
         
 def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
     ist = pytz.timezone('Asia/Kolkata')
+    
+    # Construct base message
     if classification == "Quotation Received":
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your quotation. We have received the full details regarding your product and pricing."""
+    
     elif classification == "Quotation Partially Received":
         missing_items = []
         if quotation_data.get("product", "Not present") == "Not present":
@@ -644,17 +647,26 @@ Thank you for your quotation. We have reviewed the information provided, however
             base_message += "\nPlease provide the following missing information:"
             for i, item in enumerate(missing_items, 1):
                 base_message += f"\n{i}. {item.title()}"
+    
     elif classification == "New Business Connection":
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for introducing your company and sharing your offerings with us."""
+    
     else:
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your email."""
 
+    # Prepare for meeting-related handling
     meeting_text = ""
-    if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
-        try:
-            sender_proposed = meeting_details.get("source") == "sender" if meeting_details else False
+    try:
+        schedule_decision = should_schedule_from_instructions(instructions)
+        sender_proposed = meeting_details and meeting_details.get("source") == "sender"
+        meeting_intent = meeting_details and meeting_details.get("meeting_intent") == "Yes"
+
+        should_add_meeting_text = instructions.strip() or meeting_intent
+
+        if should_add_meeting_text:
+            # Build the dynamic meeting response prompt
             prompt = f"""
 You are a professional email assistant for creating responses to suppliers who send quotations. Based on the context and instructions, generate appropriate meeting-related text for a business email.
 
@@ -678,7 +690,7 @@ Guidelines:
      - Confirm the meeting is scheduled.
      - Mention that a calendar invite has been sent.
      Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
-    - Understand the intent behind the instruction: whether we are proposing a meeting and seeking confirmation, or confirming a meeting that has already been scheduled and inviting them.
+
 3. Handle meeting_result cases:
    a. If meeting_result is 'scheduled':
       - If instructions indicate confirmation (e.g., "schedule", "book") then, acknowledge, confirm the meeting and mention the calendar invite.
@@ -712,9 +724,9 @@ Guidelines:
       Example: "Would you be available at 2:30 PM IST? Please confirm if this works for you."
 
 4. End the message with:
-   Best regards,
-   Dr. Saravanan Kesavan
-   BITSoM
+Best regards,
+Dr. Saravanan Kesavan
+BITSoM
 
 5. Keep tone professional and polite.
 6. Don't hallucinate or give replies based on examples. Understand the essence and proceed.
@@ -728,10 +740,11 @@ Respond ONLY with the text to be inserted in the email (no extra headings or mar
                 max_tokens=400
             )
             meeting_text = "\n" + response.choices[0].message.content.strip()
-        except Exception as e:
-            meeting_text = f"\nAdditional Instructions: {instructions}"
-    base_message += meeting_text
-    return base_message
+
+    except Exception as e:
+        meeting_text = f"\nAdditional Instructions: {instructions}"
+
+    return base_message + meeting_text
 
 def get_meeting_status(meeting_details, meeting_result):
     if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
