@@ -579,15 +579,50 @@ def get_meeting_date_time(meeting_details):
         return "Not Specified", "Not Specified"
 
 def should_schedule_from_instructions(instructions):
-    confirm_words = ["schedule", "book", "set up", "finalized", "go ahead", "confirm", "proceed"]
-    ask_words = ["ask", "check", "suggest", "propose", "whether", "okay", "work for you"]
-    instr_lower = instructions.lower()
-    if any(word in instr_lower for word in confirm_words):
-        return True
-    if any(word in instr_lower for word in ask_words):
+    """Determine if instructions indicate to schedule a meeting using LLM analysis."""
+    if not instructions.strip():
         return False
-    return False  # Default: don't schedule
-
+        
+    prompt = f"""
+    Analyze the following meeting scheduling instructions and determine if the user intends to:
+    1. CONFIRM/SCHEDULE - The user wants to definitively schedule the meeting now
+    2. PROPOSE/CHECK - The user is suggesting a time but wants confirmation
+    3. NEUTRAL - The instructions are unclear
+    
+    Instructions: "{instructions}"
+    
+    Respond ONLY with one of these three words:
+    - "SCHEDULE" if the instructions clearly indicate to book/schedule now
+    - "PROPOSE" if the instructions suggest a time but need confirmation  
+    - "NEUTRAL" if unclear
+    
+    Considerations:
+    - Look for imperative verbs (schedule, book, confirm)
+    - Look for tentative language (could we, would you, please confirm)
+    - Ignore greetings and pleasantries
+    - Focus on the action intent
+    """
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=10
+        )
+        decision = response.choices[0].message.content.strip().upper()
+        
+        if "SCHEDULE" in decision:
+            return True
+        elif "PROPOSE" in decision:
+            return False
+        else:  # NEUTRAL or any other response
+            return False
+            
+    except Exception as e:
+        print(f"LLM scheduling decision error: {e}")
+        return False  # Fallback to not scheduling
+        
 def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
     ist = pytz.timezone('Asia/Kolkata')
     if classification == "Quotation Received":
