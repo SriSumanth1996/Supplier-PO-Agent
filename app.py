@@ -634,7 +634,7 @@ Thank you for your email."""
                 Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
                 - If meeting_result indicates 'outside_business_hours':
                      - Do not schedule the meeting at the time requested by the sender.
-                     - Say that the proposed time made by them in the mail falls outside business hours (9 AM to 5 PM IST).
+                     - Politely explain that the proposed time falls outside business hours (9 AM to 5 PM IST).
                      - If instructions provide a new valid time:
                          - If confirmation is needed: Propose the new time and ask for confirmation.
                             - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
@@ -645,13 +645,12 @@ Thank you for your email."""
             3. If meeting_result is 'scheduled':
                    - Confirm the meeting time.
                    - Mention that a calendar invite has been sent.
-            4. End the message with a professional closing as per the flow of the mail. But end with:
+            4. End the message with a professional closing:
+               'Looking forward to our discussion.'
                'Best regards,'
                'Dr. Saravanan Kesavan'
                'BITSoM'
             5. Keep tone professional and polite.
-            6. The transition from base message to the next part must be smooth.
-            6. Don't hallucinate but follow all the instructions perfectly.
             Respond ONLY with the text to be inserted in the email (no extra headings or markers).
             """
             response = client.chat.completions.create(
