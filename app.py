@@ -583,23 +583,25 @@ Thank you for your email."""
     if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
         try:
             prompt = f"""
-            You are a professional email assistant. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
+            You are a professional email assistant for the case of creating responses to suppliers who come for quotations. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
             Email Classification: {classification}
             Original Meeting Details: {meeting_details}
             Meeting Result: {meeting_result}
             Instructions from User: "{instructions}"
             Guidelines:
             1. If meeting_result indicates 'outside_business_hours':
+               - Don't schedule any meeting at the time requested in the mail by the sender.
                - Politely explain the proposed time is outside business hours (9 AM to 5 PM IST).
                - If instructions provide a new valid time, propose that time and mention a calendar invite will be sent.
                - Otherwise, ask the recipient to suggest a time within business hours.
             2. If instructions contain a new meeting time and meeting_result is not 'outside_business_hours':
-               - Politely explain we can't meet at the original time proposed by the supplier and politely check whether they are okay with the new meeting time provided in the instructions.
-               - Propose the new time and mention a calendar invite will be sent.
+               - Politely explain we can't meet at the original time proposed by the supplier.
+               - If the instructions ask to schedule the meeting and confirm with the supplier, go ahead and schedule it for the specified date and time, and politely ask the supplier to confirm if it works for them.
+               - If the instructions only suggest proposing a time and checking availability, do not schedule the meeting. Instead, mention the proposed date and time, and ask the supplier if it works for them.
             3. If instructions request someone to join (e.g., VP):
-               - Politely request their presence and explain why if a reason is given.
+               - Politely request their presence and explain briefly why if a reason is given.
             4. For other instructions:
-               - Incorporate naturally into the email.
+               - Incorporate naturally into the email in precise, concise and professional manner.
             5. If meeting_result is 'scheduled', confirm the meeting time and include a line like:
                'A calendar invite has been sent to ensure all parties are aligned.'
             6. End the message with a professional closing:
@@ -613,7 +615,7 @@ Thank you for your email."""
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
+                temperature=0.2,
                 max_tokens=300
             )
             meeting_text = "\n" + response.choices[0].message.content.strip()
@@ -676,6 +678,7 @@ def create_quotation_received_table(emails):
         })
     df = pd.DataFrame(data)
     return df
+    
 def create_quotation_partial_table(emails):
     if not emails:
         return pd.DataFrame()
