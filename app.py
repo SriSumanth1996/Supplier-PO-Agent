@@ -332,47 +332,63 @@ def extract_meeting_details(context):
     ist = pytz.timezone('Asia/Kolkata')
     now_ist = datetime.now(ist)
     current_ist_iso = now_ist.isoformat()
+
+    # Enhanced prompt to detect source
     prompt = f"""
-    You are an intelligent meeting scheduling assistant. Read the email below and extract a clear, structured datetime for a proposed meeting.
+    You are an intelligent meeting scheduling assistant. Analyze the email below and determine:
+    1. Did the sender express intent to set up a meeting? (Yes/No)
+    2. Is a specific date/time mentioned? If yes, convert to ISO 8601 format (IST).
+    3. Who proposed the meeting time? Choose one:
+       - "sender": if the sender suggests a time (e.g., "Let's meet on 8th at 2 PM")
+       - "recipient": if the recipient (you) is asked to suggest a time (e.g., "Please let me know your availability")
+       - "mutual": if both parties are discussing options
+       - "none": if no time or intent
+
     Email Content:
     {context}
+
     Current datetime (IST): {current_ist_iso}
-    Task:
-    1. Determine if the sender intends to set up a meeting. Reply with "Yes" or "No".
-    2. If yes, infer the proposed date and time, even if partial (e.g., "6th at 4PM", "Monday morning").
-       - Convert into a full datetime string in ISO 8601 format (e.g., "2025-08-06T16:00:00+05:30").
-       - Assume Indian Standard Time (IST).
-       - If the date (e.g., "6th") has already passed this month, infer the next month's same date.
-       - Use the provided current datetime to resolve relative references.
-    3. If no date or time is found, respond with "Not specified".
+
     Output format:
     Meeting Intent: Yes/No
     Proposed Datetime: <ISO 8601 timestamp> or Not specified
+    Source: sender/recipient/mutual/none
     """
+
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=150
+            max_tokens=200
         )
         reply = response.choices[0].message.content.strip()
-        meeting_intent, proposed_datetime = "No", "Not specified"
+
+        meeting_intent = "No"
+        proposed_datetime = "Not specified"
+        source = "none"
+
         for line in reply.splitlines():
             if line.startswith("Meeting Intent:"):
                 meeting_intent = line.split(":", 1)[1].strip()
             elif line.startswith("Proposed Datetime:"):
                 proposed_datetime = line.split(":", 1)[1].strip()
+            elif line.startswith("Source:"):
+                source = line.split(":", 1)[1].strip().lower()
+                if source not in ["sender", "recipient", "mutual"]:
+                    source = "none"
+
         return {
             "meeting_intent": meeting_intent,
-            "proposed_datetime": proposed_datetime
+            "proposed_datetime": proposed_datetime,
+            "source": source
         }
     except Exception as e:
         return {
             "meeting_intent": "No",
-            "proposed_datetime": "Not specified"
+            "proposed_datetime": "Not specified",
+            "source": "none"
         }
-
 
 def extract_quotation_data(context, classification):
     if classification in ["New Business Connection", "Unknown"]:
@@ -614,8 +630,19 @@ Thank you for your email."""
     meeting_text = ""
     if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
         try:
+            # --- START: Add source detection without changing anything else ---
+            sender_proposed = False
+            if meeting_details and meeting_details.get("meeting_intent") == "Yes":
+                # Simple heuristic: if proposed_datetime exists and is not "Not specified", assume sender proposed
+                if meeting_details.get("proposed_datetime") not in ["Not specified", None]:
+                    sender_proposed = True
+            # --- END: Source detection ---
+
             prompt = f"""
             You are a professional email assistant for the case of creating responses to suppliers who come for quotations. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
+            
+            {'Note: The meeting time was proposed by the sender. Do NOT write as if we are suggesting it. Acknowledge and confirm politely.' if sender_proposed else ''}
+            
             Email Classification: {classification}
             Original Meeting Details: {meeting_details}
             Meeting Result: {meeting_result}
@@ -672,7 +699,6 @@ Thank you for your email."""
     base_message += meeting_text
 
     return base_message
-
 
 def get_meeting_status(meeting_details, meeting_result):
     if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
