@@ -428,42 +428,100 @@ def calculate_total_cost_if_missing(quotation_data):
             pass
     return quotation_data
 
-def send_reply(service, thread_id, to_email, subject, body):
-    message = MIMEText(body)
-    message['to'] = to_email
-    message['subject'] = f"Re: {subject}"
-    raw = b64.urlsafe_b64encode(message.as_bytes()).decode()
-    message = {
-        'raw': raw,
-        'threadId': thread_id
-    }
-    try:
-        sent = service.users().messages().send(userId="me", body=message).execute()
-        return True, f"Reply sent to {to_email}"
-    except Exception as e:
-        return False, f"Error sending reply: {e}"
+def send_replies_for_emails(service, calendar_service, emails, df):
+    success_count = 0
+    error_count = 0
+    selected_emails = [(email, row) for email, row in zip(emails, df.itertuples(index=False)) if getattr(row, 'Send')]
+    if not selected_emails:
+        st.warning("No emails selected to send replies.")
+        return
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    ist = pytz.timezone('Asia/Kolkata')
+    for i, (email_data, row) in enumerate(selected_emails):
+        progress = (i + 1) / len(selected_emails)
+        progress_bar.progress(progress)
+        status_text.text(f'Sending reply {i + 1} of {len(selected_emails)}...')
+        instructions = getattr(row, 'Instructions')
+        meeting_details = email_data.get('meeting_details', {})
+        meeting_result = email_data.get('meeting_result', (None, None))
+        if not isinstance(meeting_result, (tuple, list)) or len(meeting_result) < 2:
+            meeting_result = (None, None)
 
-def check_calendar_conflict(calendar_service, start_time, end_time):
-    try:
-        events_result = calendar_service.events().list(
-            calendarId='primary',
-            timeMin=start_time.isoformat(),
-            timeMax=end_time.isoformat(),
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
-        events = events_result.get('items', [])
-        for event in events:
-            event_start = datetime.fromisoformat(
-                event['start'].get('dateTime', event['start'].get('date')).replace('Z', '+00:00'))
-            event_end = datetime.fromisoformat(
-                event['end'].get('dateTime', event['end'].get('date')).replace('Z', '+00:00'))
-            if not (end_time <= event_start or start_time >= event_end):
-                return True, event.get('summary', 'Existing meeting')
-        return False, None
-    except Exception as e:
-        print(f"Error checking calendar conflict: {e}")
-        return False, None
+        # Check for meeting intent and scheduling logic
+        if meeting_details.get('meeting_intent') == "Yes" and meeting_result[1] in (None, "outside_business_hours", "no_specific_time"):
+            proposed_dt_str = "Not specified"
+            if instructions.strip():
+                try:
+                    current_time_ist = datetime.now(ist).isoformat()
+                    prompt = f"""
+                    Extract a clear meeting datetime from these instructions. If found, convert to ISO 8601 format in IST.
+                    Instructions: "{instructions}"
+                    Current Time (IST): {current_time_ist}
+                    Respond ONLY with the ISO timestamp or "Not specified" if no time found.
+                    """
+                    response = client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.3,
+                        max_tokens=50
+                    )
+                    proposed_dt_str = response.choices[0].message.content.strip()
+                except Exception as e:
+                    proposed_dt_str = "Not specified"
+                    st.error(f"Error parsing meeting time: {str(e)}")
+
+            if proposed_dt_str != "Not specified":
+                try:
+                    proposed_dt = datetime.fromisoformat(proposed_dt_str)
+                    # Validate new time against business hours
+                    start_hour = proposed_dt.hour
+                    if start_hour < 9 or start_hour >= 17:
+                        email_data['meeting_result'] = (None, "outside_business_hours")
+                    elif proposed_dt < datetime.now(ist):
+                        email_data['meeting_result'] = (None, "past_time")
+                    else:
+                        event, status = schedule_meeting(
+                            calendar_service,
+                            email_data['quotation_data'],
+                            email_data['email_address'],
+                            proposed_dt,
+                            email_data['final_classification']
+                        )
+                        email_data['meeting_result'] = (event, status)
+                except Exception as e:
+                    email_data['meeting_result'] = (None, "parse_error")
+                    st.error(f"Error parsing meeting time: {str(e)}")
+            elif meeting_result[1] == "outside_business_hours":
+                email_data['meeting_result'] = (None, "outside_business_hours")
+            else:
+                email_data['meeting_result'] = (None, "no_specific_time")
+
+        reply_body = get_reply_body(
+            email_data['final_classification'],
+            email_data['quotation_data'],
+            email_data['quotation_data'].get('sender_name'),
+            meeting_details,
+            email_data.get('meeting_result', (None, None)),
+            instructions
+        )
+        success, message = send_reply(
+            service,
+            email_data['thread_id'],
+            email_data['email_address'],
+            email_data['subject'],
+            reply_body
+        )
+        if success:
+            success_count += 1
+        else:
+            error_count += 1
+    progress_bar.progress(1.0)
+    status_text.text('Bulk reply complete!')
+    if success_count > 0:
+        st.success(f"Successfully sent {success_count} replies!")
+    if error_count > 0:
+        st.error(f"Failed to send {error_count} replies.")
 
 def schedule_meeting(calendar_service, quotation_data, email_address, proposed_datetime=None, classification="Unknown"):
     try:
