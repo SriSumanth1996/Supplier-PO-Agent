@@ -782,6 +782,21 @@ def create_business_connection_table(emails):
     df = pd.DataFrame(data)
     return df
 
+def send_reply(service, thread_id, to_email, subject, body):
+    message = MIMEText(body)
+    message['to'] = to_email
+    message['subject'] = f"Re: {subject}"
+    raw = b64.urlsafe_b64encode(message.as_bytes()).decode()
+    message = {
+        'raw': raw,
+        'threadId': thread_id
+    }
+    try:
+        sent = service.users().messages().send(userId="me", body=message).execute()
+        return True, f"Reply sent to {to_email}"
+    except Exception as e:
+        return False, f"Error sending reply: {e}"
+
 
 def send_replies_for_emails(service, calendar_service, emails, df):
     success_count = 0
