@@ -417,7 +417,7 @@ def calculate_unit_price_if_missing(quotation_data):
 def calculate_total_cost_if_missing(quotation_data):
     if quotation_data.get("quantity", "Not present") == "Not present":
         return quotation_data
-    unit_cost = quotation_data.get("unit_price orth, "Not present")
+    unit_cost = quotation_data.get("unit_price", "Not present")
     total_cost = quotation_data.get("total_cost", "Not present")
     units = quotation_data.get("quantity", "Not present")
     if total_cost == "Not present" and unit_cost != "Not present":
