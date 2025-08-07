@@ -582,8 +582,7 @@ def get_meeting_date_time(meeting_details):
         return "Not Specified", "Not Specified"
 
 
-def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None,
-                   instructions=""):
+def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
     ist = pytz.timezone('Asia/Kolkata')
     if classification == "Quotation Received":
         base_message = f"""Dear {sender_name or 'Supplier'},
@@ -615,49 +614,49 @@ Thank you for your email."""
     if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
         try:
             prompt = f"""
-            You are a professional email assistant for the case of creating responses to suppliers who come for quotations. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
-            Email Classification: {classification}
-            Original Meeting Details: {meeting_details}
-            Meeting Result: {meeting_result}
-            Instructions from User: "{instructions}"
-            Guidelines:
-            1. Avoid redundant phrases like "Thank you for your quotation" if already mentioned in the base message.
-            2. For meeting scheduling:
-               - If instructions indicate a need for **confirmation** (e.g., words like "ask", "check", "confirm", "whether they are okay", "suggest", "propose"):
-                 - Propose the new time politely.
-                 - Ask for confirmation.
-                 - Do **not** mention that a calendar invite has been sent.
-                Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm if this works for you."
-               - If instructions indicate a **confirmed action** (e.g., words like "schedule", "book", "set up", "go ahead", "finalized"):
-                 - Confirm the meeting is scheduled.
-                 - Mention that a calendar invite has been sent.
-                Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
-                - If meeting_result indicates 'outside_business_hours':
-                     - Do not schedule the meeting at the time requested by the sender.
-                     - Say that the proposed time falls outside business hours (9 AM to 5 PM IST).
-                     - If instructions provide a new valid time:
-                         - If confirmation is needed: Propose the new time and ask for confirmation.
-                         - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
-                     - If no alternative time is provided, request the recipient to suggest a time within business hours.
-                     - If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
-                        These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
-            3. If meeting_result is 'scheduled':
-                   - Confirm the meeting time.
-                   - Mention that a calendar invite has been sent.
-            4. If meeting_result is "conflict":
-                 - Say that the requested slot is not available.
-                 - If instructions provide a new valid time:
-                    - If confirmation is needed: Propose the new time and ask for confirmation.
-                    - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
-                 -  If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
-                    These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
-            5. End the message with a professional closing as per the mail with the following signature:
-               'Best regards,'
-               'Dr. Saravanan Kesavan'
-               'BITSoM'
-            6. Keep tone professional and polite.
-            Respond ONLY with the text to be inserted in the email (no extra headings or markers).
-            """
+You are a professional email assistant for responding to supplier emails. Generate meeting-related text based on the context and instructions.
+Email Classification: {classification}
+Original Meeting Details: {meeting_details}
+Meeting Result: {meeting_result}
+Instructions from User: "{instructions}"
+Guidelines:
+1. Avoid redundant phrases like "Thank you for your quotation" if already in the base message.
+2. For meeting scheduling:
+   - If meeting_details['meeting_intent'] == 'Yes' and meeting_details['proposed_datetime'] != 'Not specified' and no new time is provided in instructions:
+     - Confirm the sender's proposed time.
+     - State that a calendar invite has been sent.
+     Example: "The meeting has been scheduled for 8th August at 2:00 PM IST. A calendar invite has been sent."
+   - If instructions include a new meeting time (e.g., via "schedule on <date>", "propose <time>"):
+     - If instructions use confirmation terms (e.g., "ask", "check", "confirm", "suggest"):
+       - Propose the new time and ask for confirmation.
+       Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm."
+     - If instructions use scheduling terms (e.g., "schedule", "book", "set up"):
+       - Confirm the new time and state a calendar invite has been sent.
+       Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent."
+   - If meeting_result == 'outside_business_hours':
+     - State the proposed time is outside business hours (9 AM to 5 PM IST).
+     - If instructions provide a new valid time:
+       - If confirmation needed: Propose the new time and ask for confirmation.
+       - If scheduling confirmed: Confirm the new time and state a calendar invite will be sent.
+     - Otherwise, request a new time within business hours.
+   - If meeting_result == 'conflict':
+     - State the requested slot is unavailable.
+     - If instructions provide a new valid time:
+       - If confirmation needed: Propose the new time and ask for confirmation.
+       - If scheduling confirmed: Confirm the new time and state a calendar invite will be sent.
+     - Otherwise, request an alternative time.
+   - If meeting_result == 'scheduled':
+     - Confirm the meeting time.
+     - Mention a calendar invite has been sent.
+3. Address additional instructions (e.g., "Ask for a flyer") as separate requests.
+   Example: "Could you please share a flyer with more details about your offerings?"
+4. End with:
+   'Best regards,'
+   'Dr. Saravanan Kesavan'
+   'BITSoM'
+5. Keep tone professional and polite.
+Respond ONLY with the text to be inserted in the email.
+"""
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
@@ -668,11 +667,8 @@ Thank you for your email."""
         except Exception as e:
             meeting_text = f"\nAdditional Instructions: {instructions}"
 
-    # Now: Let AI generate the full closing including "Best regards"
     base_message += meeting_text
-
     return base_message
-
 
 def get_meeting_status(meeting_details, meeting_result):
     if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
