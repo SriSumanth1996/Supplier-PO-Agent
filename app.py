@@ -582,12 +582,44 @@ def get_meeting_date_time(meeting_details):
         return "Not Specified", "Not Specified"
 
 
-def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None,
-                   instructions=""):
+def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
     ist = pytz.timezone('Asia/Kolkata')
+    sender_name = sender_name or "Supplier"
+
+    # Determine if sender proposed a meeting time
+    sender_proposed_time = (
+        meeting_details and 
+        meeting_details.get("meeting_intent") == "Yes" and 
+        meeting_details.get("proposed_datetime") not in [None, "Not specified"]
+    )
+
+    # Parse if instructions suggest scheduling a new time
+    new_proposed_time_str = "Not specified"
+    if instructions.strip():
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{
+                    "role": "user",
+                    "content": f"""
+                    Extract any proposed meeting datetime from these instructions. 
+                    If found, return ISO 8601 in IST. Else, return "Not specified".
+                    Instructions: {instructions}
+                    Current Time (IST): {datetime.now(ist).isoformat()}
+                    """
+                }],
+                temperature=0.1,
+                max_tokens=50
+            )
+            new_proposed_time_str = response.choices[0].message.content.strip()
+        except:
+            new_proposed_time_str = "Not specified"
+
+    is_user_suggesting_new_time = new_proposed_time_str != "Not specified"
+
+    # --- Base Message ---
     if classification == "Quotation Received":
-        base_message = f"""Dear {sender_name or 'Supplier'},
-Thank you for your quotation. We have received the full details regarding your product and pricing."""
+        base_message = f"Dear {sender_name},\nThank you for your quotation. We have received the full details regarding your product and pricing."
     elif classification == "Quotation Partially Received":
         missing_items = []
         if quotation_data.get("product", "Not present") == "Not present":
@@ -598,80 +630,103 @@ Thank you for your quotation. We have received the full details regarding your p
             missing_items.append("quantity")
         if quotation_data.get("lead_time", "Not present") == "Not present":
             missing_items.append("lead time")
-        base_message = f"""Dear {sender_name or 'Supplier'},
-Thank you for your quotation. We have reviewed the information provided, however, we need additional details to complete our evaluation."""
+        base_message = f"Dear {sender_name},\nThank you for your quotation. We have reviewed the information provided, however, we need additional details to complete our evaluation."
         if missing_items:
             base_message += "\nPlease provide the following missing information:"
             for i, item in enumerate(missing_items, 1):
                 base_message += f"\n{i}. {item.title()}"
     elif classification == "New Business Connection":
-        base_message = f"""Dear {sender_name or 'Supplier'},
-Thank you for introducing your company and sharing your offerings with us."""
+        base_message = f"Dear {sender_name},\nThank you for introducing your company and sharing your offerings with us."
     else:
-        base_message = f"""Dear {sender_name or 'Supplier'},
-Thank you for your email."""
+        base_message = f"Dear {sender_name},\nThank you for your email."
 
+    # --- Meeting & Instructions Handling ---
     meeting_text = ""
-    if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
-        try:
-            prompt = f"""
-            You are a professional email assistant for the case of creating responses to suppliers who come for quotations. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
-            Email Classification: {classification}
-            Original Meeting Details: {meeting_details}
-            Meeting Result: {meeting_result}
-            Instructions from User: "{instructions}"
-            Guidelines:
-            1. Avoid redundant phrases like "Thank you for your quotation" if already mentioned in the base message.
-            2. For meeting scheduling:
-               - If instructions indicate a need for **confirmation** (e.g., words like "ask", "check", "confirm", "whether they are okay", "suggest", "propose"):
-                 - Propose the new time politely.
-                 - Ask for confirmation.
-                 - Do **not** mention that a calendar invite has been sent.
-                Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm if this works for you."
-               - If instructions indicate a **confirmed action** (e.g., words like "schedule", "book", "set up", "go ahead", "finalized"):
-                 - Confirm the meeting is scheduled.
-                 - Mention that a calendar invite has been sent.
-                Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
-                - If meeting_result indicates 'outside_business_hours':
-                     - Do not schedule the meeting at the time requested by the sender.
-                     - Say that the proposed time falls outside business hours (9 AM to 5 PM IST).
-                     - If instructions provide a new valid time:
-                         - If confirmation is needed: Propose the new time and ask for confirmation.
-                         - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
-                     - If no alternative time is provided, request the recipient to suggest a time within business hours.
-                     - If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
-                        These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
-            3. If meeting_result is 'scheduled':
-                   - Confirm the meeting time.
-                   - Mention that a calendar invite has been sent.
-            4. If meeting_result is "conflict":
-                 - Say that the requested slot is not available.
-                 - If instructions provide a new valid time:
-                    - If confirmation is needed: Propose the new time and ask for confirmation.
-                    - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
-                 -  If the instructions include other requests unrelated to time (e.g., "Ask their departmental heads to join the meeting"):
-                    These should be treated as independent directives and must still be addressed in the response, regardless of the scheduling issue.
-            5. End the message with a professional closing as per the mail with the following signature:
-               'Best regards,'
-               'Dr. Saravanan Kesavan'
-               'BITSoM'
-            6. Keep tone professional and polite.
-            Respond ONLY with the text to be inserted in the email (no extra headings or markers).
-            """
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=400
-            )
-            meeting_text = "\n" + response.choices[0].message.content.strip()
-        except Exception as e:
-            meeting_text = f"\nAdditional Instructions: {instructions}"
 
-    # Now: Let AI generate the full closing including "Best regards"
-    base_message += meeting_text
+    # Case 1: Sender proposed time, and we're not overriding it
+    if sender_proposed_time and not is_user_suggesting_new_time:
+        dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
+        date_str = dt.strftime("%d %B %Y")
+        time_str = dt.strftime("%I:%M %p")
+        meeting_text += f"\n\nThank you for proposing a meeting on {date_str} at {time_str} IST. We will review and confirm shortly."
 
-    return base_message
+        # If instructions exist (e.g., "ask for flyer"), append them
+        if instructions.strip():
+            meeting_text += f"\n\n{instructions.strip()}"
+
+        meeting_text += "\n\nLooking forward to your response."
+
+    # Case 2: Sender proposed time, but it's invalid (outside hours, conflict)
+    elif sender_proposed_time and meeting_result:
+        status = meeting_result[1]
+        dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
+        date_str = dt.strftime("%d %B %Y")
+        time_str = dt.strftime("%I:%M %p")
+
+        if status == "outside_business_hours":
+            meeting_text += f"\n\nWe acknowledge your proposed meeting on {date_str} at {time_str} IST. However, this falls outside our business hours (9:00 AM to 5:00 PM IST)."
+            if is_user_suggesting_new_time:
+                new_dt = datetime.fromisoformat(new_proposed_time_str)
+                new_date = new_dt.strftime("%d %B %Y")
+                new_time = new_dt.strftime("%I:%M %p")
+                if "confirm" in instructions.lower() or "check" in instructions.lower() or "suggest" in instructions.lower():
+                    meeting_text += f"\n\nWould you be available for a meeting on {new_date} at {new_time} IST instead? Please confirm if this works for you."
+                else:
+                    meeting_text += f"\n\nThe meeting has been rescheduled to {new_date} at {new_time} IST. A calendar invite has been sent."
+            else:
+                meeting_text += "\n\nKindly suggest a time within our business hours for further discussion."
+
+        elif status == "conflict":
+            meeting_text += f"\n\nThe proposed time ({date_str} at {time_str} IST) conflicts with an existing meeting on our calendar."
+            if is_user_suggesting_new_time:
+                new_dt = datetime.fromisoformat(new_proposed_time_str)
+                new_date = new_dt.strftime("%d %B %Y")
+                new_time = new_dt.strftime("%I:%M %p")
+                if "confirm" in instructions.lower() or "check" in instructions.lower():
+                    meeting_text += f"\n\nWould you be available for a meeting on {new_date} at {new_time} IST? Please confirm."
+                else:
+                    meeting_text += f"\n\nThe meeting has been rescheduled to {new_date} at {new_time} IST. A calendar invite has been sent."
+            else:
+                meeting_text += "\n\nPlease suggest an alternative time that works for you."
+
+    # Case 3: User is suggesting a new time (not sender)
+    elif is_user_suggesting_new_time:
+        new_dt = datetime.fromisoformat(new_proposed_time_str)
+        new_date = new_dt.strftime("%d %B %Y")
+        new_time = new_dt.strftime("%I:%M %p")
+        if "confirm" in instructions.lower() or "check" in instructions.lower() or "suggest" in instructions.lower() or "ask" in instructions.lower():
+            meeting_text += f"\n\nWould you be available for a meeting on {new_date} at {new_time} IST? Please confirm if this works for you."
+        else:
+            meeting_text += f"\n\nThe meeting has been scheduled for {new_date} at {new_time} IST. A calendar invite has been sent for your reference."
+
+    # Case 4: Sender proposed time, but no specific time (e.g., "next week")
+    elif sender_proposed_time and meeting_details.get("proposed_datetime") == "Not specified":
+        meeting_text += "\n\nWe acknowledge your request for a meeting. Could you please suggest a specific date and time that works for you?"
+
+    # Case 5: No meeting proposed, but instructions exist
+    elif instructions.strip() and not sender_proposed_time:
+        meeting_text += f"\n\n{instructions.strip()}"
+
+    # Case 6: Meeting was successfully scheduled (by system)
+    if meeting_result and isinstance(meeting_result, (list, tuple)) and len(meeting_result) > 1:
+        status = meeting_result[1]
+        if status == "scheduled" and not meeting_text.strip():
+            try:
+                event = meeting_result[0]
+                start = datetime.fromisoformat(event['start']['dateTime'])
+                date_str = start.strftime("%d %B %Y")
+                time_str = start.strftime("%I:%M %p")
+                meeting_text += f"\n\nThe meeting has been scheduled for {date_str} at {time_str} IST. A calendar invite has been sent."
+            except:
+                meeting_text += "\n\nThe meeting has been scheduled. A calendar invite has been sent."
+
+    # Final signature
+    final_message = base_message
+    if meeting_text:
+        final_message += meeting_text
+    final_message += "\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
+
+    return final_message
 
 
 def get_meeting_status(meeting_details, meeting_result):
