@@ -621,27 +621,35 @@ Thank you for your email."""
             Meeting Result: {meeting_result}
             Instructions from User: "{instructions}"
             Guidelines:
-            1. If meeting_result indicates 'outside_business_hours':
-               - Don't schedule any meeting at the time requested in the mail by the sender.
-               - Politely explain the proposed time is outside business hours (9 AM to 5 PM IST).
-               - If instructions provide a new valid time, propose that time and mention a calendar invite will be sent.
-               - Otherwise, ask the recipient to suggest a time within business hours.
-            2. If instructions contain a new meeting time and meeting_result is not 'outside_business_hours':
-               - Politely explain we can't meet at the original time proposed by the supplier.
-               - If the instructions ask to schedule the meeting and confirm with the supplier, go ahead and schedule it for the specified date and time, and politely ask the supplier to confirm if it works for them.
-               - If the instructions only suggest proposing a time and checking availability, do not schedule the meeting. Instead, mention the proposed date and time, and ask the supplier if it works for them.
-            3. If instructions request someone to join (e.g., VP):
-               - Politely request their presence and explain briefly why if a reason is given.
-            4. For other instructions:
-               - Incorporate naturally into the email in precise, concise and professional manner.
-            5. If meeting_result is 'scheduled', confirm the meeting time and include a line like:
-               'A calendar invite has been sent to ensure all parties are aligned.'
-            6. End the message with a professional closing:
+            1. Avoid redundant phrases like "Thank you for your quotation" if already mentioned in the base message.
+            2. For meeting scheduling:
+               - If instructions indicate a need for **confirmation** (e.g., words like "ask", "check", "confirm", "whether they are okay", "suggest", "propose"):
+                 - Propose the new time politely.
+                 - Ask for confirmation.
+                 - Do **not** mention that a calendar invite has been sent.
+                Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm if this works for you."
+               - If instructions indicate a **confirmed action** (e.g., words like "schedule", "book", "set up", "go ahead", "finalized"):
+                 - Confirm the meeting is scheduled.
+                 - Mention that a calendar invite has been sent.
+                Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
+                - If meeting_result indicates 'outside_business_hours':
+                     - Do not schedule the meeting at the time requested by the sender.
+                     - Politely explain that the proposed time falls outside business hours (9 AM to 5 PM IST).
+                     - If instructions provide a new valid time:
+                         - If confirmation is needed: Propose the new time and ask for confirmation.
+                            - If scheduling is confirmed: Confirm the new time and state that a calendar invite will be sent.
+                     - If no alternative time is provided, request the recipient to suggest a time within business hours.
+                     - If the instructions provide some other aspects, then they are independent.
+                       Eg: If the meeting is outside business hours as they said 8PM.Then in instructions if I say "Ask their departmental heads to join", then it is independent
+            3. If meeting_result is 'scheduled':
+                   - Confirm the meeting time.
+                   - Mention that a calendar invite has been sent.
+            4. End the message with a professional closing:
                'Looking forward to our discussion.'
                'Best regards,'
                'Dr. Saravanan Kesavan'
                'BITSoM'
-            7. Keep tone professional and polite.
+            5. Keep tone professional and polite.
             Respond ONLY with the text to be inserted in the email (no extra headings or markers).
             """
             response = client.chat.completions.create(
