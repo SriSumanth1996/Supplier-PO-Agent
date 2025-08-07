@@ -569,18 +569,16 @@ Thank you for your quotation. We have received the full details regarding your p
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your quotation. We have reviewed the information provided, however, we need additional details to complete our evaluation."""
         if missing_items:
-            base_message += f"
-Please provide the following missing information:"
+            base_message += "\nPlease provide the following missing information:"
             for i, item in enumerate(missing_items, 1):
-                base_message += f"
-{i}. {item.title()}"
+                base_message += f"\n{i}. {item.title()}"
     elif classification == "New Business Connection":
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for introducing your company and sharing your offerings with us."""
     else:
         base_message = f"""Dear {sender_name or 'Supplier'},
 Thank you for your email."""
-
+    
     meeting_text = ""
     if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
         try:
@@ -612,63 +610,41 @@ Thank you for your email."""
                 temperature=0.1,
                 max_tokens=200
             )
-            meeting_text = "
-" + response.choices[0].message.content.strip()
+            meeting_text = "\n" + response.choices[0].message.content.strip()
         except Exception as e:
-            meeting_text = f"
-Additional Instructions: {instructions}"
+            meeting_text = f"\nAdditional Instructions: {instructions}"
 
     base_message += meeting_text
-    elif classification == "New Business Connection":
-        base_message = f"""Dear {sender_name or 'Supplier'},
-Thank you for introducing your company and sharing your offerings with us."""
-    else:
-        base_message = f"""Dear {sender_name or 'Supplier'},
-Thank you for your email."""
-    meeting_text = ""
-    if instructions.strip() or (meeting_details and meeting_details.get('meeting_intent') == "Yes"):
-        try:
-            prompt = f"""
-            You are a professional email assistant. Based on the following context and instructions, generate appropriate meeting-related text for a business email.
-            Email Classification: {classification}
-            Original Meeting Details: {meeting_details}
-            Meeting Result: {meeting_result}
-            Instructions from User: "{instructions}"
-            Guidelines:
-            1. If meeting_result indicates 'outside_business_hours':
-               - Politely explain the proposed time is outside business hours (9 AM to 5 PM IST).
-               - If instructions provide a new valid time, propose that time and mention a calendar invite will be sent.
-               - Otherwise, ask the recipient to suggest a time within business hours.
-            2. If instructions contain a new meeting time and meeting_result is not 'outside_business_hours':
-               - Politely explain we can't meet at the original time proposed by the supplier and politely check whether they are okay with the new meeting time provided in the instructions.
-               - Propose the new time and mention a calendar invite will be sent.
-            3. If instructions request someone to join (e.g., VP):
-               - Politely request their presence and explain why if a reason is given.
-            4. For other instructions:
-               - Incorporate naturally into the email.
-            5. If meeting_result is 'scheduled', confirm the meeting time.
-            6. Keep tone professional and polite.
-            Respond ONLY with the text to be inserted in the email (no headings or markers).
-            """
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=200
-            )
-            meeting_text = "\n\n" + response.choices[0].message.content.strip()
-        except Exception as e:
-            meeting_text = f"\n\nAdditional Instructions: {instructions}"
-    base_message += meeting_text
+
+    # Append closing based on classification
     if classification == "Quotation Received":
-        base_message += "\n\nLooking forward to your response.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
+        base_message += """
+Looking forward to your response.
+Best regards,
+Dr. Saravanan Kesavan
+BITSoM"""
     elif classification == "Quotation Partially Received":
-        base_message += "\n\nOnce we receive the complete information, we will be able to proceed with our evaluation.\n\nThank you for your cooperation.\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
+        base_message += """
+Once we receive the complete information, we will be able to proceed with our evaluation.
+Thank you for your cooperation.
+Best regards,
+Dr. Saravanan Kesavan
+BITSoM"""
     elif classification == "New Business Connection":
-        base_message += "\n\nWe will keep your information on record and reach out to you when opportunities arise.\n\nWarm regards,\nDr. Saravanan Kesavan\nBITSoM"
+        base_message += """
+We will keep your information on record and reach out to you when opportunities arise.
+Warm regards,
+Dr. Saravanan Kesavan
+BITSoM"""
     else:
-        base_message += "\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
+        base_message += """
+Best regards,
+Dr. Saravanan Kesavan
+BITSoM"""
+
     return base_message
+
+    
 def get_meeting_status(meeting_details, meeting_result):
     if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
         return "No Meeting Requested"
