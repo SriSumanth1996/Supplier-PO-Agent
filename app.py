@@ -128,17 +128,17 @@ def generate_response(query, processed_emails):
 def authenticate_gmail_and_calendar():
     creds = None
     
-    # Step 1: Try using refresh token if stored in secrets
-    if 'REFRESH_TOKEN' in st.secrets:
-        creds = Credentials(
-            token=None,
-            refresh_token=st.secrets['REFRESH_TOKEN'],
-            token_uri='https://oauth2.googleapis.com/token',
-            client_id=st.secrets['CLIENT_ID'],
-            client_secret=st.secrets['CLIENT_SECRET'],
-            scopes=SCOPES
-        )
+    # Step 1: Try using refresh token if stored and not empty
+    if 'REFRESH_TOKEN' in st.secrets and st.secrets['REFRESH_TOKEN']:
         try:
+            creds = Credentials(
+                token=None,
+                refresh_token=st.secrets['REFRESH_TOKEN'],
+                token_uri='https://oauth2.googleapis.com/token',
+                client_id=st.secrets['CLIENT_ID'],
+                client_secret=st.secrets['CLIENT_SECRET'],
+                scopes=SCOPES
+            )
             creds.refresh(Request())
             gmail_service = build('gmail', 'v1', credentials=creds)
             calendar_service = build('calendar', 'v3', credentials=creds)
@@ -146,7 +146,7 @@ def authenticate_gmail_and_calendar():
         except Exception as e:
             st.warning(f"Could not refresh token: {e}")
     
-    # Step 2: Web app OAuth flow
+    # Step 2: Run OAuth flow to get new credentials
     redirect_uri = "https://supplier-po-agent-xtjqg94yfzebumnw6weqff.streamlit.app"
     flow = InstalledAppFlow.from_client_config(
         {
@@ -161,34 +161,42 @@ def authenticate_gmail_and_calendar():
         SCOPES
     )
 
-    # Step 3: Show the link for manual code copy-paste
-    auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline', include_granted_scopes='true')
+    # Step 3: Manual code entry if redirect can't complete automatically
+    auth_url, _ = flow.authorization_url(
+        prompt='consent',
+        access_type='offline',
+        include_granted_scopes='true'
+    )
+
     st.markdown(f"""
     1. Click [this link]({auth_url}) to authorize access  
     2. After signing in, you'll be redirected back to the app  
-    3. If redirect doesn't auto-complete, copy the full URL and paste below
+    3. If the redirect doesn't auto-complete, copy the full URL and paste it below
     """)
-    
+
     code_url = st.text_input("Paste the full redirect URL here:")
     if code_url:
         try:
-            code = parse_qs(urlparse(code_url).query)['code'][0]
-            flow.fetch_token(code=code)
+            code = parse_qs(urlparse(code_url).query).get('code')
+            if not code:
+                st.error("No 'code' parameter found in URL.")
+                return None, None
+            
+            flow.fetch_token(code=code[0])
             creds = flow.credentials
             
-            # Store refresh token for future runs
-            st.session_state['temp_creds'] = {
-                'token': creds.token,
-                'refresh_token': creds.refresh_token,
-                'token_uri': creds.token_uri,
-                'client_id': creds.client_id,
-                'client_secret': creds.client_secret,
-                'scopes': creds.scopes
-            }
-            
+            # Show refresh token so user can save it
+            if creds.refresh_token:
+                st.success("✅ Authentication successful!")
+                st.write("Copy this REFRESH_TOKEN and save it in your Streamlit secrets for future use:")
+                st.code(creds.refresh_token)
+            else:
+                st.warning("No refresh token received. Make sure 'access_type' is 'offline' and you haven't already granted access.")
+
             gmail_service = build('gmail', 'v1', credentials=creds)
             calendar_service = build('calendar', 'v3', credentials=creds)
             return gmail_service, calendar_service
+
         except Exception as e:
             st.error(f"Authentication failed: {e}")
             return None, None
