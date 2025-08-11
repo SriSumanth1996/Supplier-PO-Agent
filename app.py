@@ -152,12 +152,12 @@ def authenticate_gmail_and_calendar():
                 "client_secret": st.secrets['CLIENT_SECRET'],
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": ["http://localhost:8501", "http://localhost"]
+                "redirect_uris": ["http://localhost:8501", "http://localhost", "https://your-app-name.streamlit.app"]  # Replace with your actual Streamlit app URL
             }
         },
         SCOPES
     )
-    auth_url, _ = flow.authorization_url(prompt='consent')
+    auth_url, _ = flow.authorization_url(prompt='select_account consent', redirect_uri="https://your-app-name.streamlit.app")  # Updated to force account selection
     st.markdown(f"""
     1. Click [this link]({auth_url}) to authorize
     2. You'll be redirected to a localhost URL that won't work
@@ -168,7 +168,7 @@ def authenticate_gmail_and_calendar():
     if code_url:
         try:
             code = parse_qs(urlparse(code_url).query)['code'][0]
-            flow.fetch_token(code=code)
+            flow.fetch_token(code=code, redirect_uri="https://your-app-name.streamlit.app")
             creds = flow.credentials
             st.session_state['temp_creds'] = {
                 'token': creds.token,
@@ -188,7 +188,6 @@ def authenticate_gmail_and_calendar():
             st.error(f"Authentication failed: {e}")
             return None, None
     return None, None
-
     
 def get_email_body(msg_payload):
     body = ""
