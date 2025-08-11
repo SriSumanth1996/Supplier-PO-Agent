@@ -623,8 +623,9 @@ def should_schedule_from_instructions(instructions):
     - "NEUTRAL" if unclear
 
     Considerations:
-    - Look for imperative verbs (schedule, book, confirm)
-    - Look for tentative language (could we, would you, please confirm)
+    - Look for imperative verbs (schedule, book, confirm, proceed, set up, finalized)
+    - Look for tentative language (could we, would you, please confirm, check, suggest, whether, okay, work for you)
+    - Instructions implying meeting preparation (e.g., "bring a flyer", "prepare a presentation", "come with documents") indicate acceptance of the meeting and should be treated as "SCHEDULE"
     - Ignore greetings and pleasantries
     - Focus on the action intent
     """
@@ -649,6 +650,8 @@ def should_schedule_from_instructions(instructions):
         print(f"LLM scheduling decision error: {e}")
         return False  # Fallback to not scheduling
 
+
+        
 def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
     ist = pytz.timezone('Asia/Kolkata')
 
