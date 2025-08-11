@@ -221,6 +221,34 @@ def execute_action_plan(action_plan, email_data, calendar_service):
         print(f"Error executing action: {e}")
         return {"status": "error", "details": str(e)}
 
+
+def get_meeting_status(meeting_details, meeting_result):
+    """Determine the meeting status based on meeting details and result."""
+    if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
+        return "No Meeting Requested"
+    
+    if meeting_result and meeting_result[1]:
+        status = meeting_result[1]
+        if status == "scheduled":
+            return "Scheduled"
+        elif status == "conflict":
+            return "Conflict Detected"
+        elif status == "outside_business_hours":
+            return "Outside Business Hours"
+        elif status == "past_time":
+            return "Proposed Time Passed"
+        elif status == "no_specific_time":
+            return "No Specific Time Proposed"
+        elif status == "proposed_for_confirmation":
+            return "Awaiting Confirmation"
+        elif status == "parse_error":
+            return "Error Parsing Time"
+    
+    if meeting_details.get("proposed_datetime") != "Not specified":
+        return "Meeting Requested"
+    return "No Specific Time Proposed"
+
+
 def generate_reply_from_action(action_plan, action_result, email_data):
     """Generate email reply based on action plan and execution result."""
     classification = email_data['final_classification']
