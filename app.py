@@ -143,9 +143,6 @@ def authenticate_gmail_and_calendar():
             return gmail_service, calendar_service
         except Exception as e:
             st.warning(f"Could not refresh token: {e}")
-
-    # Manual authentication flow for Streamlit Cloud
-    redirect_uri = "https://your-app-name.streamlit.app"  # Replace with your actual Streamlit app URL
     flow = InstalledAppFlow.from_client_config(
         {
             "installed": {
@@ -153,42 +150,49 @@ def authenticate_gmail_and_calendar():
                 "client_secret": st.secrets['CLIENT_SECRET'],
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [redirect_uri]
+                "redirect_uris": ["http://localhost:8501", "http://localhost"]
             }
         },
         SCOPES
     )
-    auth_url, _ = flow.authorization_url(prompt='select_account consent')
-    st.markdown(f"""
-    1. Click [this link]({auth_url}) to authorize
-    2. You'll be redirected to a URL (it may show an error page)
-    3. Copy the entire URL from your browser's address bar
-    4. Paste it below
-    """)
-    code_url = st.text_input("Paste the redirect URL here:")
-    if code_url:
-        try:
-            code = parse_qs(urlparse(code_url).query)['code'][0]
-            flow.fetch_token(code=code, redirect_uri=redirect_uri)
-            creds = flow.credentials
-            st.session_state['temp_creds'] = {
-                'token': creds.token,
-                'refresh_token': creds.refresh_token,
-                'token_uri': creds.token_uri,
-                'client_id': creds.client_id,
-                'client_secret': creds.client_secret,
-                'scopes': creds.scopes
-            }
-            st.success("Authentication successful! Copy this refresh token and add it to your Streamlit secrets as REFRESH_TOKEN:")
-            st.code(creds.refresh_token)  # Displays the token for copying
-            gmail_service = build('gmail', 'v1', credentials=creds)
-            calendar_service = build('calendar', 'v3', credentials=creds)
-            return gmail_service, calendar_service
-        except Exception as e:
-            st.error(f"Authentication failed: {e}")
-            return None, None
-    return None, None
-    
+    if not st.runtime.exists():
+        auth_url, _ = flow.authorization_url(prompt='consent')
+        st.markdown(f"""
+        1. Click [this link]({auth_url}) to authorize
+        2. You'll be redirected to a localhost URL that won't work
+        3. Copy the entire URL from your browser's address bar
+        4. Paste it below
+        """)
+        code_url = st.text_input("Paste the redirect URL here:")
+        if code_url:
+            try:
+                code = parse_qs(urlparse(code_url).query)['code'][0]
+                flow.fetch_token(code=code)
+                creds = flow.credentials
+                st.session_state['temp_creds'] = {
+                    'token': creds.token,
+                    'refresh_token': creds.refresh_token,
+                    'token_uri': creds.token_uri,
+                    'client_id': creds.client_id,
+                    'client_secret': creds.client_secret,
+                    'scopes': creds.scopes
+                }
+                gmail_service = build('gmail', 'v1', credentials=creds)
+                calendar_service = build('calendar', 'v3', credentials=creds)
+                return gmail_service, calendar_service
+            except Exception as e:
+                st.error(f"Authentication failed: {e}")
+                return None, None
+        return None, None
+    try:
+        creds = flow.run_local_server(port=0)
+        gmail_service = build('gmail', 'v1', credentials=creds)
+        calendar_service = build('calendar', 'v3', credentials=creds)
+        return gmail_service, calendar_service
+    except Exception as e:
+        st.error(f"Authentication failed: {e}")
+        return None, None
+
 def get_email_body(msg_payload):
     body = ""
     if 'parts' in msg_payload:
