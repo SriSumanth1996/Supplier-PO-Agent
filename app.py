@@ -190,6 +190,10 @@ def authenticate_gmail_and_calendar():
                 st.success("✅ Authentication successful!")
                 st.write("Copy this REFRESH_TOKEN and save it in your Streamlit secrets for future use:")
                 st.code(creds.refresh_token)
+
+                # Debug: show full credentials JSON
+                st.write("Full credentials (debug only, do not share publicly):")
+                st.code(creds.to_json())
             else:
                 st.warning("No refresh token received. Make sure 'access_type' is 'offline' and you haven't already granted access.")
 
