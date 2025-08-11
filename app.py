@@ -128,14 +128,25 @@ def generate_response(query, processed_emails):
 
 def authenticate_gmail_and_calendar():
     creds = None
+    refresh_token = None
 
-    # Step 1: Load refresh token from file if exists
-    try:
-        with open("refresh_token.json", "r") as f:
-            token_data = json.load(f)
+    # Step 1: Try refresh token from secrets first
+    if 'REFRESH_TOKEN' in st.secrets and st.secrets['REFRESH_TOKEN']:
+        refresh_token = st.secrets['REFRESH_TOKEN']
+    else:
+        # Step 2: Try loading from file (local dev)
+        try:
+            with open("refresh_token.json", "r") as f:
+                refresh_token = json.load(f).get('refresh_token')
+        except FileNotFoundError:
+            pass
+
+    # If we have a refresh token → try using it
+    if refresh_token:
+        try:
             creds = Credentials(
                 token=None,
-                refresh_token=token_data['refresh_token'],
+                refresh_token=refresh_token,
                 token_uri='https://oauth2.googleapis.com/token',
                 client_id=st.secrets['CLIENT_ID'],
                 client_secret=st.secrets['CLIENT_SECRET'],
@@ -145,10 +156,10 @@ def authenticate_gmail_and_calendar():
             gmail_service = build('gmail', 'v1', credentials=creds)
             calendar_service = build('calendar', 'v3', credentials=creds)
             return gmail_service, calendar_service
-    except FileNotFoundError:
-        st.info("No refresh token file found. Please log in.")
+        except Exception as e:
+            st.warning(f"Could not refresh token: {e}")
 
-    # Step 2: OAuth flow
+    # Step 3: OAuth flow
     redirect_uri = "https://supplier-po-agent-xtjqg94yfzebumnw6weqff.streamlit.app"
     flow = Flow.from_client_config(
         {
@@ -164,20 +175,20 @@ def authenticate_gmail_and_calendar():
     )
     flow.redirect_uri = redirect_uri
 
-    # If Google redirected back with ?code=...
     query_params = st.query_params
     if "code" in query_params:
         flow.fetch_token(code=query_params["code"])
         creds = flow.credentials
 
         if creds.refresh_token:
-            token_data = {"refresh_token": creds.refresh_token}
-            with open("refresh_token.json", "w") as f:
-                json.dump(token_data, f)
-            st.success("✅ Authentication successful! Refresh token saved to 'refresh_token.json'. Download and store it securely.")
+            st.success("✅ Authentication successful!")
+            st.write("Add this REFRESH_TOKEN to your Streamlit secrets or save it as 'refresh_token.json':")
+            st.code(creds.refresh_token)
+
+            # Also offer download for local dev
             st.download_button(
                 label="Download refresh_token.json",
-                data=json.dumps(token_data),
+                data=json.dumps({"refresh_token": creds.refresh_token}),
                 file_name="refresh_token.json",
                 mime="application/json"
             )
@@ -189,7 +200,6 @@ def authenticate_gmail_and_calendar():
         return gmail_service, calendar_service
 
     else:
-        # First-time login link
         auth_url, _ = flow.authorization_url(
             prompt='consent',
             access_type='offline',
@@ -198,6 +208,7 @@ def authenticate_gmail_and_calendar():
         st.markdown(f"[Click here to authorize access]({auth_url})")
 
     return None, None
+
     
 def get_email_body(msg_payload):
     body = ""
