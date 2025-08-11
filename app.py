@@ -1084,6 +1084,34 @@ def send_replies_for_emails(service, calendar_service, emails, df):
     if error_count > 0:
         st.error(f"Failed to send {error_count} replies.")
 
+def get_meeting_status(meeting_details, meeting_result):
+    if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
+        return "No Meeting Requested"
+    if meeting_result:
+        status = meeting_result[1]
+        if status == "scheduled":
+            return "Meeting Scheduled"
+        elif status == "conflict":
+            return "Schedule Conflict"
+        elif status == "outside_business_hours":
+            return "Outside Business Hours"
+        elif status == "past_time":
+            return "Time Already Passed"
+        elif status == "no_specific_time":
+            return "No Specific Time"
+        elif status == "incomplete_details":
+            return "Incomplete Details"
+        elif status == "parse_error":
+            return "Time Parse Error"
+        elif status == "proposed_for_confirmation":
+            return "Meeting Proposed for Confirmation"
+        else:
+            return "Error Occurred"
+    else:
+        return "Meeting Requested"
+
+
+
 def create_quotation_received_table(emails):
     """Create table for complete quotations."""
     if not emails:
