@@ -22,6 +22,8 @@ import html2text
 import uuid
 
 logger = get_logger(__name__)
+
+# Initialize OpenAI client
 if 'OPENAI_API_KEY' in st.secrets:
     OPENAI_API_KEY = st.secrets['OPENAI_API_KEY']
 else:
@@ -32,10 +34,14 @@ else:
         st.error("OpenAI API key not found. Please add it to secrets or API.txt file.")
         st.stop()
 client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Define Gmail and Calendar scopes
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/calendar'
 ]
+
+# Mapping for quotation data extraction
 qa_mapping = {
     "What is the product or item being quoted?": "product",
     "How many units or quantity?": "quantity",
@@ -48,6 +54,8 @@ qa_mapping = {
     "What is the contact phone number mentioned in the email signature?": "contact_number",
     "What is the sender's designation or job title mentioned in the email signature?": "designation"
 }
+
+# Initialize session state
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'gmail_service' not in st.session_state:
@@ -62,7 +70,320 @@ if 'chat_messages' not in st.session_state:
          "content": "Ask me about supplier quotes or email details, e.g.:\n- 'Are there any partial quotes?'\n- 'Show details for SKF 6205 quotes'\n- 'What are the latest quotes under $10?'"}
     ]
 
+# ==================== ENHANCED INSTRUCTION HANDLING ====================
+
+def interpret_instruction(instruction, email_context, calendar_status=None):
+    """Convert natural language instructions into structured action plans."""
+    prompt = f"""
+You are a smart instruction interpreter for a supplier email automation system.
+
+INSTRUCTION FROM USER: "{instruction}"
+
+EMAIL CONTEXT:
+{json.dumps(email_context, indent=2)}
+
+CURRENT CALENDAR STATUS: {calendar_status or 'Unknown'}
+
+Convert this instruction into a structured action plan with these possible actions:
+
+1. MEETING ACTIONS:
+   - "confirm_meeting": Confirm and schedule the proposed time
+   - "propose_new_time": Suggest a different time (include ISO time in params)
+   - "schedule_if_no_conflict": Schedule only if no conflict
+   - "schedule_if_conflict_then_shift": If conflict, shift by X minutes
+   - "ask_for_availability": Ask sender to suggest a time
+
+2. QUOTATION ACTIONS:
+   - "request_missing_info": Ask for specific missing fields
+   - "negotiate_price": Counter with a different price
+   - "request_expedited_shipping": Ask for faster delivery
+   - "conditional_acceptance": Accept only if condition met
+
+3. GENERAL ACTIONS:
+   - "custom_reply": Send a specific message
+   - "follow_up_question": Ask a specific question
+
+OUTPUT FORMAT (JSON ONLY):
+{{
+  "action": "action_type",
+  "params": {{
+    "time": "ISO 8601 (if time involved)",
+    "shift_minutes": 30,
+    "new_price": 20.50,
+    "max_lead_time": 7,
+    "missing_fields": ["price", "quantity"],
+    "condition_field": "unit_price",
+    "condition_value": 50,
+    "condition_operator": "<",
+    "custom_message": "Your text here"
+  }},
+  "reply_tone": "professional|polite|direct",
+  "requires_calendar_check": true|false
+}}
+
+Respond with ONLY the JSON object, no explanations.
+"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            response_format={"type": "json_object"},
+            max_tokens=300
+        )
+        return json.loads(response.choices[0].message.content.strip())
+    except Exception as e:
+        print(f"Error interpreting instruction: {e}")
+        return {
+            "action": "custom_reply",
+            "params": {"custom_message": instruction},
+            "reply_tone": "professional"
+        }
+
+def execute_action_plan(action_plan, email_data, calendar_service):
+    """Execute actions based on the interpreted instruction."""
+    result = {"status": "unprocessed", "details": None}
+    
+    try:
+        # Meeting-related actions
+        if action_plan["action"] in ["confirm_meeting", "propose_new_time", "schedule_if_no_conflict", "schedule_if_conflict_then_shift"]:
+            proposed_time = email_data.get("meeting_details", {}).get("proposed_datetime")
+            current_time = datetime.now(pytz.timezone('Asia/Kolkata'))
+            
+            # Get the time to schedule (either from params or original proposal)
+            schedule_time = None
+            if action_plan["params"].get("time"):
+                schedule_time = datetime.fromisoformat(action_plan["params"]["time"])
+            elif proposed_time and proposed_time != "Not specified":
+                schedule_time = datetime.fromisoformat(proposed_time)
+            
+            # Handle time shifting if needed
+            if action_plan["action"] == "schedule_if_conflict_then_shift" and schedule_time:
+                shift_minutes = action_plan["params"].get("shift_minutes", 30)
+                schedule_time = schedule_time + timedelta(minutes=shift_minutes)
+            
+            # Validate business hours
+            if schedule_time:
+                if schedule_time.hour < 9 or schedule_time.hour >= 17:
+                    return {"status": "outside_business_hours", "details": schedule_time}
+                if schedule_time < current_time:
+                    return {"status": "past_time", "details": schedule_time}
+            
+            # Check for conflicts if needed
+            if action_plan.get("requires_calendar_check", False) and schedule_time:
+                end_time = schedule_time + timedelta(minutes=30)
+                has_conflict, _ = check_calendar_conflict(calendar_service, schedule_time, end_time)
+                if has_conflict and action_plan["action"] == "schedule_if_no_conflict":
+                    return {"status": "conflict", "details": schedule_time}
+            
+            # Schedule the meeting if appropriate
+            if schedule_time and action_plan["action"] in ["confirm_meeting", "schedule_if_no_conflict", "schedule_if_conflict_then_shift"]:
+                event, status = schedule_meeting(
+                    calendar_service,
+                    email_data['quotation_data'],
+                    email_data['email_address'],
+                    schedule_time,
+                    email_data['final_classification']
+                )
+                return {"status": status, "details": event}
+            elif schedule_time and action_plan["action"] == "propose_new_time":
+                return {"status": "proposed_for_confirmation", "details": schedule_time}
+        
+        # Quotation-related actions
+        elif action_plan["action"] == "negotiate_price":
+            return {"status": "price_negotiation", "details": action_plan["params"].get("new_price")}
+        
+        elif action_plan["action"] == "conditional_acceptance":
+            field = action_plan["params"].get("condition_field")
+            value = email_data['quotation_data'].get(field)
+            operator = action_plan["params"].get("condition_operator", "<")
+            condition_met = False
+            
+            try:
+                if operator == "<":
+                    condition_met = float(value) < float(action_plan["params"].get("condition_value"))
+                elif operator == ">":
+                    condition_met = float(value) > float(action_plan["params"].get("condition_value"))
+                elif operator == "<=":
+                    condition_met = float(value) <= float(action_plan["params"].get("condition_value"))
+                elif operator == ">=":
+                    condition_met = float(value) >= float(action_plan["params"].get("condition_value"))
+                elif operator == "==":
+                    condition_met = str(value) == str(action_plan["params"].get("condition_value"))
+            except:
+                condition_met = False
+            
+            return {"status": "condition_checked", "details": condition_met}
+        
+        return {"status": "processed", "details": action_plan}
+    
+    except Exception as e:
+        print(f"Error executing action: {e}")
+        return {"status": "error", "details": str(e)}
+
+def generate_reply_from_action(action_plan, action_result, email_data):
+    """Generate email reply based on action plan and execution result."""
+    classification = email_data['final_classification']
+    quotation_data = email_data['quotation_data']
+    sender_name = quotation_data.get('sender_name', 'Supplier')
+    meeting_details = email_data.get('meeting_details', {})
+    
+    # Base message based on classification
+    if classification == "Quotation Received":
+        base_message = f"""Dear {sender_name},
+Thank you for your complete quotation. We have received all the necessary details."""
+    elif classification == "Quotation Partially Received":
+        base_message = f"""Dear {sender_name},
+Thank you for your quotation. We've reviewed it but need some additional information."""
+    else:
+        base_message = f"""Dear {sender_name},
+Thank you for your email."""
+    
+    # Generate action-specific response
+    action_response = ""
+    
+    # Meeting-related responses
+    if action_plan["action"] in ["confirm_meeting", "propose_new_time", "schedule_if_no_conflict", "schedule_if_conflict_then_shift"]:
+        if action_result["status"] == "scheduled":
+            meeting_time = action_result["details"]["start"].get("dateTime")
+            dt = datetime.fromisoformat(meeting_time)
+            formatted_time = dt.strftime("%A, %B %d at %I:%M %p IST")
+            action_response = f"""
+We have scheduled a meeting as requested for {formatted_time}. A calendar invite has been sent to you."""
+        
+        elif action_result["status"] == "proposed_for_confirmation":
+            meeting_time = action_result["details"]
+            dt = datetime.fromisoformat(meeting_time) if isinstance(meeting_time, str) else meeting_time
+            formatted_time = dt.strftime("%A, %B %d at %I:%M %p IST")
+            action_response = f"""
+Would you be available for a meeting on {formatted_time}? Please confirm if this time works for you."""
+        
+        elif action_result["status"] == "conflict":
+            action_response = """
+The proposed meeting time conflicts with an existing appointment. Could you please suggest an alternative time?"""
+        
+        elif action_result["status"] == "outside_business_hours":
+            action_response = """
+The proposed time is outside our standard business hours (9 AM to 5 PM IST). Please suggest a time within this window."""
+    
+    # Quotation-related responses
+    elif action_plan["action"] == "negotiate_price":
+        new_price = action_result["details"]
+        action_response = f"""
+Would it be possible to reduce the unit price to {new_price}? Please let us know if this is acceptable."""
+    
+    elif action_plan["action"] == "conditional_acceptance":
+        if action_result["details"]:  # Condition met
+            action_response = """
+The quoted terms meet our requirements. We would like to proceed with the order."""
+        else:  # Condition not met
+            action_response = """
+The current quoted terms don't meet our requirements. Could you please revise your offer?"""
+    
+    # Custom reply fallback
+    if not action_response and action_plan["action"] == "custom_reply":
+        action_response = action_plan["params"].get("custom_message", "")
+    
+    # Combine base message with action response
+    full_reply = base_message + action_response
+    
+    # Add standard closing
+    full_reply += """
+    
+Best regards,
+Dr. Saravanan Kesavan
+BITSoM"""
+    
+    return full_reply
+
+def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
+    """Generate reply body based on classification and instructions."""
+    if instructions.strip():
+        # Use enhanced instruction handling if instructions provided
+        email_context = {
+            "classification": classification,
+            "quotation_data": quotation_data,
+            "meeting_details": meeting_details,
+            "meeting_status": meeting_result[1] if meeting_result else None
+        }
+        action_plan = interpret_instruction(
+            instructions,
+            email_context,
+            meeting_result[1] if meeting_result else None
+        )
+        action_result = execute_action_plan(
+            action_plan,
+            {
+                "final_classification": classification,
+                "quotation_data": quotation_data,
+                "email_address": quotation_data.get("email", ""),
+                "meeting_details": meeting_details
+            },
+            st.session_state.calendar_service
+        )
+        return generate_reply_from_action(action_plan, action_result, {
+            "final_classification": classification,
+            "quotation_data": quotation_data
+        })
+    else:
+        # Fallback to basic reply if no instructions
+        ist = pytz.timezone('Asia/Kolkata')
+        base_message = ""
+        if classification == "Quotation Received":
+            base_message = f"""Dear {sender_name or 'Supplier'},
+Thank you for your quotation. We have received the full details regarding your product and pricing."""
+        elif classification == "Quotation Partially Received":
+            missing_items = []
+            if quotation_data.get("product", "Not present") == "Not present":
+                missing_items.append("product details")
+            if quotation_data.get("unit_price", "Not present") == "Not present":
+                missing_items.append("unit price")
+            if quotation_data.get("quantity", "Not present") == "Not present":
+                missing_items.append("quantity")
+            if quotation_data.get("lead_time", "Not present") == "Not present":
+                missing_items.append("lead time")
+            base_message = f"""Dear {sender_name or 'Supplier'},
+Thank you for your quotation. We have reviewed the information provided, however, we need additional details to complete our evaluation."""
+            if missing_items:
+                base_message += "\nPlease provide the following missing information:"
+                for i, item in enumerate(missing_items, 1):
+                    base_message += f"\n{i}. {item.title()}"
+        elif classification == "New Business Connection":
+            base_message = f"""Dear {sender_name or 'Supplier'},
+Thank you for introducing your company and sharing your offerings with us."""
+        else:
+            base_message = f"""Dear {sender_name or 'Supplier'},
+Thank you for your email."""
+        
+        meeting_text = ""
+        if meeting_details and meeting_details.get("meeting_intent") == "Yes":
+            status = meeting_result[1] if meeting_result else None
+            if status == "scheduled":
+                dt = datetime.fromisoformat(meeting_result[0]["start"]["dateTime"])
+                formatted_time = dt.strftime("%A, %B %d at %I:%M %p IST")
+                meeting_text = f"\nThe meeting has been scheduled for {formatted_time}. A calendar invite has been sent for your reference."
+            elif status == "conflict":
+                meeting_text = "\nThe proposed meeting time conflicts with our schedule. Could you please suggest another time?"
+            elif status == "outside_business_hours":
+                meeting_text = "\nThe proposed time is outside our business hours (9 AM to 5 PM IST). Please suggest a time within this window."
+            elif status == "no_specific_time":
+                meeting_text = "\nWe noticed that no specific time was proposed. Could you please share your availability?"
+            elif status == "proposed_for_confirmation":
+                dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
+                formatted_time = dt.strftime("%A, %B %d at %I:%M %p IST")
+                meeting_text = f"\nWould you be available for a meeting on {formatted_time}? Please confirm if this works for you."
+            elif not status:
+                if meeting_details.get("proposed_datetime") != "Not specified":
+                    dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
+                    formatted_time = dt.strftime("%A, %B %d at %I:%M %p IST")
+                    meeting_text = f"\nWould you be available for a meeting on {formatted_time}? Please confirm if this works for you."
+                else:
+                    meeting_text = "\nWe noticed that no specific time was proposed. Could you please share your availability?"
+        
+        return base_message + meeting_text + "\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
+
 def chatbot_response(prompt):
+    """Handle chatbot interactions in the sidebar."""
     st.sidebar.header("🔍 Supplier Quotation Assistant")
     for msg in st.session_state.chat_messages:
         st.sidebar.chat_message(msg["role"]).write(msg["content"])
@@ -81,6 +402,7 @@ def chatbot_response(prompt):
                     st.session_state.chat_messages.append({"role": "assistant", "content": response})
 
 def generate_response(query, processed_emails):
+    """Generate a response to user queries based on processed emails."""
     email_context = []
     for email in processed_emails:
         qd = email['quotation_data']
@@ -127,21 +449,22 @@ def generate_response(query, processed_emails):
         return f"Error processing query: {str(e)}"
 
 def authenticate_gmail_and_calendar():
+    """Authenticate with Google Gmail and Calendar APIs."""
     creds = None
     refresh_token = None
 
-    # Step 1: Try refresh token from secrets first
+    # Step 1: Try refresh token from secrets
     if 'REFRESH_TOKEN' in st.secrets and st.secrets['REFRESH_TOKEN']:
         refresh_token = st.secrets['REFRESH_TOKEN']
     else:
-        # Step 2: Try loading from file (local dev)
+        # Step 2: Try loading from file
         try:
             with open("refresh_token.json", "r") as f:
                 refresh_token = json.load(f).get('refresh_token')
         except FileNotFoundError:
             pass
 
-    # If we have a refresh token → try using it
+    # Step 3: Use refresh token if available
     if refresh_token:
         try:
             creds = Credentials(
@@ -159,7 +482,7 @@ def authenticate_gmail_and_calendar():
         except Exception as e:
             st.warning(f"Could not refresh token: {e}")
 
-    # Step 3: OAuth flow
+    # Step 4: OAuth flow
     redirect_uri = "https://supplier-po-agent-xtjqg94yfzebumnw6weqff.streamlit.app"
     flow = Flow.from_client_config(
         {
@@ -184,8 +507,6 @@ def authenticate_gmail_and_calendar():
             st.success("✅ Authentication successful!")
             st.write("Add this REFRESH_TOKEN to your Streamlit secrets or save it as 'refresh_token.json':")
             st.code(creds.refresh_token)
-
-            # Also offer download for local dev
             st.download_button(
                 label="Download refresh_token.json",
                 data=json.dumps({"refresh_token": creds.refresh_token}),
@@ -198,7 +519,6 @@ def authenticate_gmail_and_calendar():
         gmail_service = build('gmail', 'v1', credentials=creds)
         calendar_service = build('calendar', 'v3', credentials=creds)
         return gmail_service, calendar_service
-
     else:
         auth_url, _ = flow.authorization_url(
             prompt='consent',
@@ -206,11 +526,10 @@ def authenticate_gmail_and_calendar():
             include_granted_scopes='true'
         )
         st.markdown(f"[Click here to authorize access]({auth_url})")
-
     return None, None
 
-    
 def get_email_body(msg_payload):
+    """Extract email body from payload."""
     body = ""
     if 'parts' in msg_payload:
         for part in msg_payload['parts']:
@@ -234,6 +553,7 @@ def get_email_body(msg_payload):
     return body
 
 def ask_openai(question, context):
+    """Extract specific information from email content using OpenAI."""
     prompt = f"""
     You are a specialized Purchase Order (PO) and supplier quotation data extraction assistant. Your task is to analyze business emails from suppliers and extract specific information accurately.
     EMAIL CONTENT TO ANALYZE:
@@ -295,6 +615,7 @@ def ask_openai(question, context):
         return f"Error: {str(e)}"
 
 def classify_email_intent(context):
+    """Classify email intent based on content."""
     prompt = f"""
     You are an email classification assistant specialized in analyzing supplier/business emails.
     EMAIL CONTENT TO ANALYZE:
@@ -339,12 +660,13 @@ def classify_email_intent(context):
         return "Unknown"
 
 def extract_meeting_details(context):
+    """Extract meeting details from email content."""
     ist = pytz.timezone('Asia/Kolkata')
     now_ist = datetime.now(ist)
     current_ist_iso = now_ist.isoformat()
     prompt = f"""
     You are an intelligent meeting scheduling assistant. Analyze the email below and determine:
-    1.Determine if the sender intends to set up a meeting. Reply with "Yes" or "No".
+    1. Determine if the sender intends to set up a meeting. Reply with "Yes" or "No".
     2. Is a specific date/time mentioned? If yes, convert to ISO 8601 format (IST).
     3. If yes, infer the proposed date and time, even if partial (e.g., "6th at 4PM", "Monday morning").
        - Convert into a full datetime string in ISO 8601 format (e.g., "2025-08-06T16:00:00+05:30").
@@ -397,6 +719,7 @@ def extract_meeting_details(context):
         }
 
 def extract_quotation_data(context, classification):
+    """Extract quotation data based on classification."""
     if classification in ["New Business Connection", "Unknown"]:
         business_qa_mapping = {
             "What is the supplier's location, city, or place mentioned in the email signature?": "place",
@@ -410,6 +733,7 @@ def extract_quotation_data(context, classification):
         return {key: ask_openai(question, context) for question, key in qa_mapping.items()}
 
 def get_final_classification(quotation_data, initial_classification):
+    """Determine final email classification."""
     if initial_classification in ["New Business Connection", "Unknown"]:
         return initial_classification
     required_fields = ["product", "quantity", "unit_price", "lead_time"]
@@ -419,6 +743,7 @@ def get_final_classification(quotation_data, initial_classification):
     return "Quotation Received"
 
 def calculate_unit_price_if_missing(quotation_data):
+    """Calculate unit price if missing and total cost is available."""
     if quotation_data.get("quantity", "Not present") == "Not present":
         return quotation_data
     unit_cost = quotation_data.get("unit_price", "Not present")
@@ -437,6 +762,7 @@ def calculate_unit_price_if_missing(quotation_data):
     return quotation_data
 
 def calculate_total_cost_if_missing(quotation_data):
+    """Calculate total cost if missing and unit price is available."""
     if quotation_data.get("quantity", "Not present") == "Not present":
         return quotation_data
     unit_cost = quotation_data.get("unit_price", "Not present")
@@ -454,6 +780,7 @@ def calculate_total_cost_if_missing(quotation_data):
     return quotation_data
 
 def send_reply(service, thread_id, to_email, subject, body):
+    """Send an email reply."""
     message = MIMEText(body)
     message['to'] = to_email
     message['subject'] = f"Re: {subject}"
@@ -469,6 +796,7 @@ def send_reply(service, thread_id, to_email, subject, body):
         return False, f"Error sending reply: {e}"
 
 def check_calendar_conflict(calendar_service, start_time, end_time):
+    """Check for calendar conflicts."""
     try:
         events_result = calendar_service.events().list(
             calendarId='primary',
@@ -491,6 +819,7 @@ def check_calendar_conflict(calendar_service, start_time, end_time):
         return False, None
 
 def schedule_meeting(calendar_service, quotation_data, email_address, proposed_datetime=None, classification="Unknown"):
+    """Schedule a meeting in Google Calendar."""
     try:
         ist = pytz.timezone('Asia/Kolkata')
         now = datetime.now(ist)
@@ -558,6 +887,7 @@ def schedule_meeting(calendar_service, quotation_data, email_address, proposed_d
         return None, "error"
 
 def parse_new_datetime(instructions, reference_datetime_str=None):
+    """Parse a new datetime from instructions."""
     ist = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist)
     current_iso = now.isoformat()
@@ -578,7 +908,6 @@ Rules:
 
 Answer:
 """
-
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -590,8 +919,8 @@ Answer:
     except Exception as e:
         return "Not specified"
 
-
 def get_meeting_date_time(meeting_details):
+    """Extract meeting date and time from meeting details."""
     if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
         return "Not Requested", "Not Requested"
     if meeting_details.get("proposed_datetime") == "Not specified":
@@ -605,10 +934,9 @@ def get_meeting_date_time(meeting_details):
         return "Not Specified", "Not Specified"
 
 def should_schedule_from_instructions(instructions):
-    """Determine if instructions indicate to schedule a meeting using LLM analysis."""
+    """Determine if instructions indicate to schedule a meeting."""
     if not instructions.strip():
         return False
-        
     prompt = f"""
     Analyze the following meeting scheduling instructions and determine if the user intends to:
     1. CONFIRM/SCHEDULE - The user wants to definitively schedule the meeting now
@@ -628,7 +956,6 @@ def should_schedule_from_instructions(instructions):
     - Ignore greetings and pleasantries
     - Focus on the action intent
     """
-    
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -637,258 +964,13 @@ def should_schedule_from_instructions(instructions):
             max_tokens=10
         )
         decision = response.choices[0].message.content.strip().upper()
-        
-        if "SCHEDULE" in decision:
-            return True
-        elif "PROPOSE" in decision:
-            return False
-        else:  # NEUTRAL or any other response
-            return False
-            
+        return decision == "SCHEDULE"
     except Exception as e:
         print(f"LLM scheduling decision error: {e}")
-        return False  # Fallback to not scheduling
-        
-def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
-    ist = pytz.timezone('Asia/Kolkata')
-    
-    # Construct base message
-    if classification == "Quotation Received":
-        base_message = f"""Dear {sender_name or 'Supplier'},
-Thank you for your quotation. We have received the full details regarding your product and pricing."""
-    
-    elif classification == "Quotation Partially Received":
-        missing_items = []
-        if quotation_data.get("product", "Not present") == "Not present":
-            missing_items.append("product details")
-        if quotation_data.get("unit_price", "Not present") == "Not present":
-            missing_items.append("unit price")
-        if quotation_data.get("quantity", "Not present") == "Not present":
-            missing_items.append("quantity")
-        if quotation_data.get("lead_time", "Not present") == "Not present":
-            missing_items.append("lead time")
-        base_message = f"""Dear {sender_name or 'Supplier'},
-Thank you for your quotation. We have reviewed the information provided, however, we need additional details to complete our evaluation."""
-        if missing_items:
-            base_message += "\nPlease provide the following missing information:"
-            for i, item in enumerate(missing_items, 1):
-                base_message += f"\n{i}. {item.title()}"
-    
-    elif classification == "New Business Connection":
-        base_message = f"""Dear {sender_name or 'Supplier'},
-Thank you for introducing your company and sharing your offerings with us."""
-    
-    else:
-        base_message = f"""Dear {sender_name or 'Supplier'},
-Thank you for your email."""
-
-    # Prepare for meeting-related handling
-    meeting_text = ""
-    try:
-        schedule_decision = should_schedule_from_instructions(instructions)
-        sender_proposed = meeting_details and meeting_details.get("source") == "sender"
-        meeting_intent = meeting_details and meeting_details.get("meeting_intent") == "Yes"
-
-        should_add_meeting_text = instructions.strip() or meeting_intent
-
-        if should_add_meeting_text:
-            # Build the dynamic meeting response prompt
-            prompt = f"""
-You are a professional email assistant for creating responses to suppliers who send quotations. Based on the context and instructions, generate appropriate meeting-related text for a business email.
-
-{'Note: The meeting time was proposed by the sender. Do NOT write as if we are suggesting it. Acknowledge and confirm politely.' if sender_proposed else ''}
-
-Email Classification: {classification}
-Original Meeting Details: {meeting_details}
-Meeting Result: {meeting_result}
-Instructions from User: "{instructions}"
-
-Guidelines:
-1. Avoid redundant phrases like "Thank you for your quotation" if already in the base message.
-
-2. For meeting scheduling:
-   - If instructions contain words like "ask", "check", "confirm", "suggest", "propose", "whether", "okay", "work for you":
-     - Do NOT confirm the meeting or mention a calendar invite.
-     - Propose the new time politely and ask for confirmation.
-     Example: "Would you be available for a meeting on 12th August at 11:00 AM IST? Please confirm if this works for you."
-   - If instructions contain words like "schedule", "book", "set up", "finalized", "go ahead", "confirm", "proceed":
-     - Schedule the meeting.
-     - Confirm the meeting is scheduled.
-     - Mention that a calendar invite has been sent.
-     Example: "The meeting has been scheduled for 12th August at 11:00 AM IST. A calendar invite has been sent for your reference."
-
-3. Handle meeting_result cases:
-   a. If meeting_result is 'scheduled':
-      - If instructions indicate confirmation (e.g., "schedule", "book") then, acknowledge, confirm the meeting and mention the calendar invite.
-      - If instructions indicate proposal (e.g., "ask", "suggest"), override, explain politely that we are not able to attend the meeting as per the stated time and propose the new time without confirming or mentioning an invite.
-   b. If meeting_result is 'conflict':
-      - State the requested slot is unavailable.
-      - If instructions provide a new valid time:
-          - If confirmation needed: Propose the new time and ask for confirmation.
-          - If scheduling confirmed: Confirm the new time and mention a calendar invite.
-      - Else:
-          - Ask the sender to suggest another time.
-          Example: "The proposed time conflicts with our schedule. Could you please suggest another time that works for you?"
-   c. If meeting_result is 'outside_business_hours':
-      - Inform that the proposed time is outside working hours (9 AM to 5 PM IST).
-      - If instructions provide a new valid time:
-          - If confirmation needed: Propose the new time and ask for confirmation.
-          - If scheduling confirmed: Confirm the new time and mention a calendar invite.
-      - Else:
-          - Ask the sender to suggest a time within business hours.
-          Example: "The proposed time is outside our business hours. Please suggest a time between 9 AM and 5 PM IST."
-   d. If meeting_result is 'no_specific_time':
-      - State that no clear meeting time was proposed.
-      - Ask the sender to suggest a specific date and time.
-      - If instructions provide a new valid time, then state that no clear meeting was proposed and do the following:
-          - If confirmation needed: Propose the new time and ask for confirmation.
-          - If scheduling confirmed: Confirm the new time and mention a calendar invite.
-      Example: "We noticed that no specific time was proposed. Could you please share your availability so we can coordinate?"
-   e. If meeting_result is 'proposed_for_confirmation':
-      - Propose the time from instructions and ask for confirmation.
-      - Do NOT mention a calendar invite.
-      Example: "Would you be available at 2:30 PM IST? Please confirm if this works for you."
-
-4. End the message with:
-Best regards,
-Dr. Saravanan Kesavan
-BITSoM
-
-5. Keep tone professional and polite.
-6. Don't hallucinate or give replies based on examples. Understand the essence and proceed.
-
-Respond ONLY with the text to be inserted in the email (no extra headings or markers).
-"""
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=400
-            )
-            meeting_text = "\n" + response.choices[0].message.content.strip()
-
-    except Exception as e:
-        meeting_text = f"\nAdditional Instructions: {instructions}"
-
-    return base_message + meeting_text
-
-def get_meeting_status(meeting_details, meeting_result):
-    if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
-        return "No Meeting Requested"
-    if meeting_result:
-        status = meeting_result[1]
-        if status == "scheduled":
-            return "Meeting Scheduled"
-        elif status == "conflict":
-            return "Schedule Conflict"
-        elif status == "outside_business_hours":
-            return "Outside Business Hours"
-        elif status == "past_time":
-            return "Time Already Passed"
-        elif status == "no_specific_time":
-            return "No Specific Time"
-        elif status == "incomplete_details":
-            return "Incomplete Details"
-        elif status == "parse_error":
-            return "Time Parse Error"
-        elif status == "proposed_for_confirmation":
-            return "Meeting Proposed for Confirmation"
-        else:
-            return "Error Occurred"
-    else:
-        return "Meeting Requested"
-
-def create_quotation_received_table(emails):
-    if not emails:
-        return pd.DataFrame()
-    data = []
-    for email in emails:
-        qd = email['quotation_data']
-        meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
-        meeting_date, meeting_time = get_meeting_date_time(email.get('meeting_details'))
-        data.append({
-            'Sender Name': qd.get('sender_name', 'Not present'),
-            'Company': qd.get('company_name', 'Not present'),
-            'Email': email['email_address'],
-            'Product': qd.get('product', 'Not present').split(':')[-1].strip() if ':' in qd.get('product', 'Not present') else qd.get('product', 'Not present'),
-            'Quantity': qd.get('quantity', 'Not present'),
-            'Unit Price': qd.get('unit_price', 'Not present'),
-            'Total Cost': qd.get('total_cost', 'Not present'),
-            'Lead Time': qd.get('lead_time', 'Not present'),
-            'Location': qd.get('place', 'Not present'),
-            'Contact': qd.get('contact_number', 'Not present'),
-            'Meeting Status': meeting_status,
-            'Date of Meeting': meeting_date,
-            'Time of Meeting': meeting_time,
-            'Instructions': '',
-            'Send': False
-        })
-    df = pd.DataFrame(data)
-    return df
-
-def create_quotation_partial_table(emails):
-    if not emails:
-        return pd.DataFrame()
-    data = []
-    for email in emails:
-        qd = email['quotation_data']
-        meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
-        meeting_date, meeting_time = get_meeting_date_time(email.get('meeting_details'))
-        missing_fields = []
-        if qd.get('product', 'Not present') == 'Not present':
-            missing_fields.append('Product')
-        if qd.get('quantity', 'Not present') == 'Not present':
-            missing_fields.append('Quantity')
-        if qd.get('unit_price', 'Not present') == 'Not present':
-            missing_fields.append('Unit Price')
-        if qd.get('lead_time', 'Not present') == 'Not present':
-            missing_fields.append('Lead Time')
-        data.append({
-            'Sender Name': qd.get('sender_name', 'Not present'),
-            'Company': qd.get('company_name', 'Not present'),
-            'Email': email['email_address'],
-            'Product': qd.get('product', 'Not present').split(':')[-1].strip() if ':' in qd.get('product', 'Not present') else qd.get('product', 'Not present'),
-            'Quantity': qd.get('quantity', 'Not present'),
-            'Unit Price': qd.get('unit_price', 'Not present'),
-            'Total Cost': qd.get('total_cost', 'Not present'),
-            'Lead Time': qd.get('lead_time', 'Not present'),
-            'Location': qd.get('place', 'Not present'),
-            'Contact': qd.get('contact_number', 'Not present'),
-            'Missing Fields': ', '.join(missing_fields) if missing_fields else 'None',
-            'Meeting Status': meeting_status,
-            'Date of Meeting': meeting_date,
-            'Time of Meeting': meeting_time,
-            'Instructions': '',
-            'Send': False
-        })
-    df = pd.DataFrame(data)
-    return df
-
-def create_business_connection_table(emails):
-    if not emails:
-        return pd.DataFrame()
-    data = []
-    for email in emails:
-        qd = email['quotation_data']
-        meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
-        meeting_date, meeting_time = get_meeting_date_time(email.get('meeting_details'))
-        data.append({
-            'Sender Name': qd.get('sender_name', 'Not present'),
-            'Company': qd.get('company_name', 'Not present'),
-            'Email': email['email_address'],
-            'Designation': qd.get('designation', 'Not present'),
-            'Location': qd.get('place', 'Not present'),
-            'Contact': qd.get('contact_number', 'Not present'),
-            'Meeting Status': meeting_status,
-            'Date of Meeting': meeting_date,
-            'Time of Meeting': meeting_time,
-            'Instructions': '',
-            'Send': False
-        })
-    df = pd.DataFrame(data)
-    return df
+        return False
 
 def send_replies_for_emails(service, calendar_service, emails, df):
+    """Send replies for selected emails."""
     success_count = 0
     error_count = 0
     selected_emails = [(email, row) for email, row in zip(emails, df.itertuples(index=False)) if getattr(row, 'Send')]
@@ -912,16 +994,13 @@ def send_replies_for_emails(service, calendar_service, emails, df):
             current_status = meeting_result[1]
             ist = pytz.timezone('Asia/Kolkata')
             try:
-                # Check instructions FIRST for new time or intent
                 reference_datetime = meeting_details.get("proposed_datetime", None)
                 new_time_str = parse_new_datetime(instructions, reference_datetime)
-
                 should_schedule = should_schedule_from_instructions(instructions)
                 
                 if instructions.strip() and new_time_str != "Not specified":
                     new_dt = datetime.fromisoformat(new_time_str)
                     if should_schedule:
-                        # User intends to schedule the new time
                         event, status = schedule_meeting(
                             calendar_service,
                             email_data['quotation_data'],
@@ -931,10 +1010,8 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                         )
                         email_data['meeting_result'] = (event, status)
                     else:
-                        # User intends to propose the new time
                         email_data['meeting_result'] = (None, "proposed_for_confirmation")
                 elif current_status in (None, "No Meeting Requested"):
-                    # No new time in instructions; try sender's time
                     proposed_dt_str = meeting_details.get("proposed_datetime")
                     if proposed_dt_str and proposed_dt_str != "Not specified":
                         proposed_dt = datetime.fromisoformat(proposed_dt_str)
@@ -949,7 +1026,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                             if has_conflict:
                                 email_data['meeting_result'] = (None, "conflict")
                             elif should_schedule:
-                                # Auto-schedule sender's time only if explicitly instructed
                                 event, status = schedule_meeting(
                                     calendar_service,
                                     email_data['quotation_data'],
@@ -963,7 +1039,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                     else:
                         email_data['meeting_result'] = (None, "no_specific_time")
                 elif current_status in ("outside_business_hours", "conflict", "no_specific_time"):
-                    # Try new time from instructions
                     if new_time_str != "Not specified":
                         new_dt = datetime.fromisoformat(new_time_str)
                         if should_schedule:
@@ -1009,7 +1084,98 @@ def send_replies_for_emails(service, calendar_service, emails, df):
     if error_count > 0:
         st.error(f"Failed to send {error_count} replies.")
 
+def create_quotation_received_table(emails):
+    """Create table for complete quotations."""
+    if not emails:
+        return pd.DataFrame()
+    data = []
+    for email in emails:
+        qd = email['quotation_data']
+        meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
+        meeting_date, meeting_time = get_meeting_date_time(email.get('meeting_details'))
+        data.append({
+            'Sender Name': qd.get('sender_name', 'Not present'),
+            'Company': qd.get('company_name', 'Not present'),
+            'Email': email['email_address'],
+            'Product': qd.get('product', 'Not present').split(':')[-1].strip() if ':' in qd.get('product', 'Not present') else qd.get('product', 'Not present'),
+            'Quantity': qd.get('quantity', 'Not present'),
+            'Unit Price': qd.get('unit_price', 'Not present'),
+            'Total Cost': qd.get('total_cost', 'Not present'),
+            'Lead Time': qd.get('lead_time', 'Not present'),
+            'Location': qd.get('place', 'Not present'),
+            'Contact': qd.get('contact_number', 'Not present'),
+            'Meeting Status': meeting_status,
+            'Date of Meeting': meeting_date,
+            'Time of Meeting': meeting_time,
+            'Instructions': '',
+            'Send': False
+        })
+    return pd.DataFrame(data)
+
+def create_quotation_partial_table(emails):
+    """Create table for partial quotations."""
+    if not emails:
+        return pd.DataFrame()
+    data = []
+    for email in emails:
+        qd = email['quotation_data']
+        meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
+        meeting_date, meeting_time = get_meeting_date_time(email.get('meeting_details'))
+        missing_fields = []
+        if qd.get('product', 'Not present') == 'Not present':
+            missing_fields.append('Product')
+        if qd.get('quantity', 'Not present') == 'Not present':
+            missing_fields.append('Quantity')
+        if qd.get('unit_price', 'Not present') == 'Not present':
+            missing_fields.append('Unit Price')
+        if qd.get('lead_time', 'Not present') == 'Not present':
+            missing_fields.append('Lead Time')
+        data.append({
+            'Sender Name': qd.get('sender_name', 'Not present'),
+            'Company': qd.get('company_name', 'Not present'),
+            'Email': email['email_address'],
+            'Product': qd.get('product', 'Not present').split(':')[-1].strip() if ':' in qd.get('product', 'Not present') else qd.get('product', 'Not present'),
+            'Quantity': qd.get('quantity', 'Not present'),
+            'Unit Price': qd.get('unit_price', 'Not present'),
+            'Total Cost': qd.get('total_cost', 'Not present'),
+            'Lead Time': qd.get('lead_time', 'Not present'),
+            'Location': qd.get('place', 'Not present'),
+            'Contact': qd.get('contact_number', 'Not present'),
+            'Missing Fields': ', '.join(missing_fields) if missing_fields else 'None',
+            'Meeting Status': meeting_status,
+            'Date of Meeting': meeting_date,
+            'Time of Meeting': meeting_time,
+            'Instructions': '',
+            'Send': False
+        })
+    return pd.DataFrame(data)
+
+def create_business_connection_table(emails):
+    """Create table for new business connections."""
+    if not emails:
+        return pd.DataFrame()
+    data = []
+    for email in emails:
+        qd = email['quotation_data']
+        meeting_status = get_meeting_status(email.get('meeting_details'), email.get('meeting_result'))
+        meeting_date, meeting_time = get_meeting_date_time(email.get('meeting_details'))
+        data.append({
+            'Sender Name': qd.get('sender_name', 'Not present'),
+            'Company': qd.get('company_name', 'Not present'),
+            'Email': email['email_address'],
+            'Designation': qd.get('designation', 'Not present'),
+            'Location': qd.get('place', 'Not present'),
+            'Contact': qd.get('contact_number', 'Not present'),
+            'Meeting Status': meeting_status,
+            'Date of Meeting': meeting_date,
+            'Time of Meeting': meeting_time,
+            'Instructions': '',
+            'Send': False
+        })
+    return pd.DataFrame(data)
+
 def display_classification_tables(processed_emails):
+    """Display tables for different email classifications."""
     if not processed_emails:
         st.warning("No emails processed yet.")
         return
@@ -1108,6 +1274,7 @@ def display_classification_tables(processed_emails):
             st.write(f"- {email['email_address']}: {email['subject']}")
 
 def process_emails(gmail_service, calendar_service, num_emails=5):
+    """Process emails and extract relevant data."""
     results = gmail_service.users().messages().list(
         userId='me',
         q='category:primary',
@@ -1161,6 +1328,7 @@ def process_emails(gmail_service, calendar_service, num_emails=5):
     return processed_emails
 
 def main():
+    """Main application function."""
     st.set_page_config(page_title="Supplier Quotation Processor", layout="wide")
     st.title("Supplier Quotation Processing System")
     st.markdown(
