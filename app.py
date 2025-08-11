@@ -296,6 +296,34 @@ BITSoM"""
     
     return full_reply
 
+
+def get_meeting_status(meeting_details, meeting_result):
+    """Determine the meeting status based on meeting details and result."""
+    if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
+        return "Not Requested"
+    if not meeting_result or len(meeting_result) < 2:
+        return "Pending"
+    status = meeting_result[1]
+    if status == "scheduled":
+        return "Scheduled"
+    elif status == "conflict":
+        return "Conflict"
+    elif status == "outside_business_hours":
+        return "Outside Business Hours"
+    elif status == "no_specific_time":
+        return "No Specific Time"
+    elif status == "proposed_for_confirmation":
+        return "Proposed for Confirmation"
+    elif status == "past_time":
+        return "Past Time"
+    elif status == "parse_error":
+        return "Error Parsing Time"
+    return "Unknown"
+
+
+
+
+
 def get_reply_body(classification, quotation_data, sender_name, meeting_details=None, meeting_result=None, instructions=""):
     """Generate reply body based on classification and instructions."""
     if instructions.strip():
