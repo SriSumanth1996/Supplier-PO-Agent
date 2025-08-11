@@ -143,8 +143,9 @@ def authenticate_gmail_and_calendar():
             return gmail_service, calendar_service
         except Exception as e:
             st.warning(f"Could not refresh token: {e}")
-    
-    # Manual authentication flow (use this in Cloud)
+
+    # Manual authentication flow for Streamlit Cloud
+    redirect_uri = "https://your-app-name.streamlit.app"  # Replace with your actual Streamlit app URL
     flow = InstalledAppFlow.from_client_config(
         {
             "installed": {
@@ -152,15 +153,15 @@ def authenticate_gmail_and_calendar():
                 "client_secret": st.secrets['CLIENT_SECRET'],
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": ["http://localhost:8501", "http://localhost", "https://your-app-name.streamlit.app"]  # Replace with your actual Streamlit app URL
+                "redirect_uris": [redirect_uri]
             }
         },
         SCOPES
     )
-    auth_url, _ = flow.authorization_url(prompt='select_account consent', redirect_uri="https://your-app-name.streamlit.app")  # Updated to force account selection
+    auth_url, _ = flow.authorization_url(prompt='select_account consent')
     st.markdown(f"""
     1. Click [this link]({auth_url}) to authorize
-    2. You'll be redirected to a localhost URL that won't work
+    2. You'll be redirected to a URL (it may show an error page)
     3. Copy the entire URL from your browser's address bar
     4. Paste it below
     """)
@@ -168,7 +169,7 @@ def authenticate_gmail_and_calendar():
     if code_url:
         try:
             code = parse_qs(urlparse(code_url).query)['code'][0]
-            flow.fetch_token(code=code, redirect_uri="https://your-app-name.streamlit.app")
+            flow.fetch_token(code=code, redirect_uri=redirect_uri)
             creds = flow.credentials
             st.session_state['temp_creds'] = {
                 'token': creds.token,
@@ -178,7 +179,6 @@ def authenticate_gmail_and_calendar():
                 'client_secret': creds.client_secret,
                 'scopes': creds.scopes
             }
-            # Display the refresh token so you can copy it
             st.success("Authentication successful! Copy this refresh token and add it to your Streamlit secrets as REFRESH_TOKEN:")
             st.code(creds.refresh_token)  # Displays the token for copying
             gmail_service = build('gmail', 'v1', credentials=creds)
