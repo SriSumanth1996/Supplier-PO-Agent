@@ -127,6 +127,9 @@ def generate_response(query, processed_emails):
         return f"Error processing query: {str(e)}"
 
 def authenticate_gmail_and_calendar():
+    if "saved_refresh_token" not in st.session_state:
+        st.session_state.saved_refresh_token = None
+
     creds = None
     refresh_token = None
 
@@ -181,9 +184,10 @@ def authenticate_gmail_and_calendar():
         creds = flow.credentials
 
         if creds.refresh_token:
+            st.session_state.saved_refresh_token = creds.refresh_token  # ✅ Keep it persistent
             st.success("✅ Authentication successful!")
             st.write("Add this REFRESH_TOKEN to your Streamlit secrets or save it as 'refresh_token.json':")
-            st.code(creds.refresh_token)
+            st.code(st.session_state.saved_refresh_token)
 
             # Also offer download for local dev
             st.download_button(
@@ -199,7 +203,13 @@ def authenticate_gmail_and_calendar():
         calendar_service = build('calendar', 'v3', credentials=creds)
         return gmail_service, calendar_service
 
+    # Show saved token if available
+    if st.session_state.saved_refresh_token:
+        st.info("Copy and save this refresh token for your secrets:")
+        st.code(st.session_state.saved_refresh_token)
+
     else:
+        # Step 4: First-time login link
         auth_url, _ = flow.authorization_url(
             prompt='consent',
             access_type='offline',
