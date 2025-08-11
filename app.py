@@ -129,7 +129,7 @@ def generate_response(query, processed_emails):
 def authenticate_gmail_and_calendar():
     creds = None
 
-    # Step 1: Try refresh token if already stored
+    # Step 1: Try using stored refresh token
     if 'REFRESH_TOKEN' in st.secrets and st.secrets['REFRESH_TOKEN']:
         try:
             creds = Credentials(
@@ -147,9 +147,8 @@ def authenticate_gmail_and_calendar():
         except Exception as e:
             st.warning(f"Could not refresh token: {e}")
 
-    # Step 2: Manual OAuth if no refresh token
+    # Step 2: OAuth flow
     redirect_uri = "https://supplier-po-agent-xtjqg94yfzebumnw6weqff.streamlit.app"
-
     flow = Flow.from_client_config(
         {
             "web": {
@@ -160,47 +159,39 @@ def authenticate_gmail_and_calendar():
                 "redirect_uris": [redirect_uri]
             }
         },
-        scopes=SCOPES,
-        redirect_uri=redirect_uri
+        scopes=SCOPES
     )
+    flow.redirect_uri = redirect_uri
 
-    auth_url, _ = flow.authorization_url(
-        prompt='consent',
-        access_type='offline',
-        include_granted_scopes='true'
-    )
-
-    st.markdown(f"""
-    1. Click [this link]({auth_url}) to authorize access  
-    2. After signing in, you'll be redirected back to the app  
-    3. If redirect doesn't auto-complete, copy the full URL and paste below
-    """)
-
-    code_url = st.text_input("Paste the full redirect URL here:")
-    if code_url:
+    # Check if user came back with ?code= in URL
+    query_params = st.query_params
+    if "code" in query_params:
         try:
-            code = parse_qs(urlparse(code_url).query).get('code')
-            if not code:
-                st.error("No 'code' parameter found in URL.")
-                return None, None
-            
-            flow.fetch_token(code=code[0])
+            flow.fetch_token(code=query_params["code"])
             creds = flow.credentials
 
+            # Show refresh token for saving
             if creds.refresh_token:
                 st.success("✅ Authentication successful!")
-                st.write("Copy this REFRESH_TOKEN and save it in your Streamlit secrets:")
+                st.write("Copy this REFRESH_TOKEN into your Streamlit secrets:")
                 st.code(creds.refresh_token)
             else:
-                st.warning("No refresh token received. Ensure 'access_type=offline' and revoke old access in Google Account before retrying.")
+                st.warning("No refresh token received. Revoke access in Google account and try again.")
 
             gmail_service = build('gmail', 'v1', credentials=creds)
             calendar_service = build('calendar', 'v3', credentials=creds)
             return gmail_service, calendar_service
-
         except Exception as e:
             st.error(f"Authentication failed: {e}")
             return None, None
+    else:
+        # No code → show sign in link
+        auth_url, _ = flow.authorization_url(
+            prompt='consent',
+            access_type='offline',
+            include_granted_scopes='true'
+        )
+        st.markdown(f"[Click here to authorize access]({auth_url})")
 
     return None, None
     
