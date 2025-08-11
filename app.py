@@ -130,15 +130,18 @@ def authenticate_gmail_and_calendar():
     creds = None
     refresh_token = None
 
+    # Step 1: Try refresh token from secrets first
     if 'REFRESH_TOKEN' in st.secrets and st.secrets['REFRESH_TOKEN']:
         refresh_token = st.secrets['REFRESH_TOKEN']
     else:
+        # Step 2: Try loading from file (local dev)
         try:
             with open("refresh_token.json", "r") as f:
                 refresh_token = json.load(f).get('refresh_token')
         except FileNotFoundError:
             pass
 
+    # If we have a refresh token → try using it
     if refresh_token:
         try:
             creds = Credentials(
@@ -156,7 +159,7 @@ def authenticate_gmail_and_calendar():
         except Exception as e:
             st.warning(f"Could not refresh token: {e}")
 
-    # OAuth flow
+    # Step 3: OAuth flow
     redirect_uri = "https://supplier-po-agent-xtjqg94yfzebumnw6weqff.streamlit.app"
     flow = Flow.from_client_config(
         {
@@ -172,19 +175,17 @@ def authenticate_gmail_and_calendar():
     )
     flow.redirect_uri = redirect_uri
 
-    query_params = st.experimental_get_query_params()  # safer call
+    query_params = st.query_params
     if "code" in query_params:
-        flow.fetch_token(code=query_params["code"][0])
+        flow.fetch_token(code=query_params["code"])
         creds = flow.credentials
 
         if creds.refresh_token:
             st.success("✅ Authentication successful!")
             st.write("Add this REFRESH_TOKEN to your Streamlit secrets or save it as 'refresh_token.json':")
+            st.code(creds.refresh_token)
 
-            # Use st.text_area to make it easy to copy and stay visible
-            st.text_area("REFRESH_TOKEN", value=creds.refresh_token, height=100)
-
-            # Offer download button for local dev convenience
+            # Also offer download for local dev
             st.download_button(
                 label="Download refresh_token.json",
                 data=json.dumps({"refresh_token": creds.refresh_token}),
@@ -207,6 +208,7 @@ def authenticate_gmail_and_calendar():
         st.markdown(f"[Click here to authorize access]({auth_url})")
 
     return None, None
+
     
 def get_email_body(msg_payload):
     body = ""
