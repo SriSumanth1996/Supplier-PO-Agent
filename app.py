@@ -221,34 +221,6 @@ def execute_action_plan(action_plan, email_data, calendar_service):
         print(f"Error executing action: {e}")
         return {"status": "error", "details": str(e)}
 
-
-def get_meeting_status(meeting_details, meeting_result):
-    """Determine the meeting status based on meeting details and result."""
-    if not meeting_details or meeting_details.get("meeting_intent") != "Yes":
-        return "No Meeting Requested"
-    
-    if meeting_result and meeting_result[1]:
-        status = meeting_result[1]
-        if status == "scheduled":
-            return "Scheduled"
-        elif status == "conflict":
-            return "Conflict Detected"
-        elif status == "outside_business_hours":
-            return "Outside Business Hours"
-        elif status == "past_time":
-            return "Proposed Time Passed"
-        elif status == "no_specific_time":
-            return "No Specific Time Proposed"
-        elif status == "proposed_for_confirmation":
-            return "Awaiting Confirmation"
-        elif status == "parse_error":
-            return "Error Parsing Time"
-    
-    if meeting_details.get("proposed_datetime") != "Not specified":
-        return "Meeting Requested"
-    return "No Specific Time Proposed"
-
-
 def generate_reply_from_action(action_plan, action_result, email_data):
     """Generate email reply based on action plan and execution result."""
     classification = email_data['final_classification']
@@ -339,27 +311,6 @@ def get_reply_body(classification, quotation_data, sender_name, meeting_details=
             email_context,
             meeting_result[1] if meeting_result else None
         )
-        # Check if action is meeting-related
-        meeting_actions = [
-            "confirm_meeting", "propose_new_time", "schedule_if_no_conflict",
-            "schedule_if_conflict_then_shift", "ask_for_availability"
-        ]
-        is_meeting_action = action_plan["action"] in meeting_actions
-        
-        # If sender proposed the time and instruction is not meeting-related, confirm the meeting
-        if (meeting_details and meeting_details.get("meeting_intent") == "Yes" and 
-            meeting_details.get("source") == "sender" and not is_meeting_action and
-            meeting_details.get("proposed_datetime") != "Not specified"):
-            action_plan = {
-                "action": "confirm_meeting",
-                "params": {"time": meeting_details.get("proposed_datetime")},
-                "reply_tone": "professional",
-                "requires_calendar_check": True
-            }
-            # Append the original instruction as a follow-up question
-            if action_plan["action"] != "custom_reply":
-                action_plan["params"]["custom_message"] = instructions
-        
         action_result = execute_action_plan(
             action_plan,
             {
@@ -422,18 +373,15 @@ Thank you for your email."""
                 formatted_time = dt.strftime("%A, %B %d at %I:%M %p IST")
                 meeting_text = f"\nWould you be available for a meeting on {formatted_time}? Please confirm if this works for you."
             elif not status:
-                if (meeting_details.get("proposed_datetime") != "Not specified" and 
-                    meeting_details.get("source") == "sender"):
-                    # If sender proposed the time and no instructions, confirm it
+                if meeting_details.get("proposed_datetime") != "Not specified":
                     dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
                     formatted_time = dt.strftime("%A, %B %d at %I:%M %p IST")
-                    meeting_text = f"\nWe confirm the meeting for {formatted_time}. A calendar invite will be sent."
+                    meeting_text = f"\nWould you be available for a meeting on {formatted_time}? Please confirm if this works for you."
                 else:
                     meeting_text = "\nWe noticed that no specific time was proposed. Could you please share your availability?"
         
         return base_message + meeting_text + "\n\nBest regards,\nDr. Saravanan Kesavan\nBITSoM"
 
-        
 def chatbot_response(prompt):
     """Handle chatbot interactions in the sidebar."""
     st.sidebar.header("🔍 Supplier Quotation Assistant")
@@ -1042,33 +990,7 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         if not isinstance(meeting_result, (tuple, list)) or len(meeting_result) < 2:
             meeting_result = (None, None)
         
-        if meeting_details.get('meeting_intent') == "Yes" and not instructions.strip():
-            # If no instructions and sender proposed the time, schedule it
-            if (meeting_details.get("source") == "sender" and 
-                meeting_details.get("proposed_datetime") != "Not specified"):
-                proposed_dt = datetime.fromisoformat(meeting_details["proposed_datetime"])
-                ist = pytz.timezone('Asia/Kolkata')
-                start_time = proposed_dt
-                end_time = start_time + timedelta(minutes=30)
-                if start_time.hour < 9 or start_time.hour >= 17:
-                    email_data['meeting_result'] = (None, "outside_business_hours")
-                elif start_time < datetime.now(ist):
-                    email_data['meeting_result'] = (None, "past_time")
-                else:
-                    has_conflict, _ = check_calendar_conflict(calendar_service, start_time, end_time)
-                    if has_conflict:
-                        email_data['meeting_result'] = (None, "conflict")
-                    else:
-                        event, status = schedule_meeting(
-                            calendar_service,
-                            email_data['quotation_data'],
-                            email_data['email_address'],
-                            proposed_dt,
-                            email_data['final_classification']
-                        )
-                        email_data['meeting_result'] = (event, status)
-        
-        if instructions.strip():
+        if meeting_details.get('meeting_intent') == "Yes":
             current_status = meeting_result[1]
             ist = pytz.timezone('Asia/Kolkata')
             try:
@@ -1076,18 +998,19 @@ def send_replies_for_emails(service, calendar_service, emails, df):
                 new_time_str = parse_new_datetime(instructions, reference_datetime)
                 should_schedule = should_schedule_from_instructions(instructions)
                 
-                if new_time_str != "Not specified" and should_schedule:
+                if instructions.strip() and new_time_str != "Not specified":
                     new_dt = datetime.fromisoformat(new_time_str)
-                    event, status = schedule_meeting(
-                        calendar_service,
-                        email_data['quotation_data'],
-                        email_data['email_address'],
-                        new_dt,
-                        email_data['final_classification']
-                    )
-                    email_data['meeting_result'] = (event, status)
-                elif new_time_str != "Not specified" and not should_schedule:
-                    email_data['meeting_result'] = (None, "proposed_for_confirmation")
+                    if should_schedule:
+                        event, status = schedule_meeting(
+                            calendar_service,
+                            email_data['quotation_data'],
+                            email_data['email_address'],
+                            new_dt,
+                            email_data['final_classification']
+                        )
+                        email_data['meeting_result'] = (event, status)
+                    else:
+                        email_data['meeting_result'] = (None, "proposed_for_confirmation")
                 elif current_status in (None, "No Meeting Requested"):
                     proposed_dt_str = meeting_details.get("proposed_datetime")
                     if proposed_dt_str and proposed_dt_str != "Not specified":
@@ -1160,6 +1083,7 @@ def send_replies_for_emails(service, calendar_service, emails, df):
         st.success(f"Successfully sent {success_count} replies!")
     if error_count > 0:
         st.error(f"Failed to send {error_count} replies.")
+
 def create_quotation_received_table(emails):
     """Create table for complete quotations."""
     if not emails:
