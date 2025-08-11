@@ -127,6 +127,8 @@ def generate_response(query, processed_emails):
 
 def authenticate_gmail_and_calendar():
     creds = None
+    
+    # Step 1: Try using refresh token if stored in secrets
     if 'REFRESH_TOKEN' in st.secrets:
         creds = Credentials(
             token=None,
@@ -143,55 +145,55 @@ def authenticate_gmail_and_calendar():
             return gmail_service, calendar_service
         except Exception as e:
             st.warning(f"Could not refresh token: {e}")
+    
+    # Step 2: Web app OAuth flow
+    redirect_uri = "https://supplier-po-agent-xtjqg94yfzebumnw6weqff.streamlit.app"
     flow = InstalledAppFlow.from_client_config(
         {
-            "installed": {
+            "web": {
                 "client_id": st.secrets['CLIENT_ID'],
                 "client_secret": st.secrets['CLIENT_SECRET'],
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": ["http://localhost:8501", "http://localhost"]
+                "redirect_uris": [redirect_uri]
             }
         },
         SCOPES
     )
-    if not st.runtime.exists():
-        auth_url, _ = flow.authorization_url(prompt='consent')
-        st.markdown(f"""
-        1. Click [this link]({auth_url}) to authorize
-        2. You'll be redirected to a localhost URL that won't work
-        3. Copy the entire URL from your browser's address bar
-        4. Paste it below
-        """)
-        code_url = st.text_input("Paste the redirect URL here:")
-        if code_url:
-            try:
-                code = parse_qs(urlparse(code_url).query)['code'][0]
-                flow.fetch_token(code=code)
-                creds = flow.credentials
-                st.session_state['temp_creds'] = {
-                    'token': creds.token,
-                    'refresh_token': creds.refresh_token,
-                    'token_uri': creds.token_uri,
-                    'client_id': creds.client_id,
-                    'client_secret': creds.client_secret,
-                    'scopes': creds.scopes
-                }
-                gmail_service = build('gmail', 'v1', credentials=creds)
-                calendar_service = build('calendar', 'v3', credentials=creds)
-                return gmail_service, calendar_service
-            except Exception as e:
-                st.error(f"Authentication failed: {e}")
-                return None, None
-        return None, None
-    try:
-        creds = flow.run_local_server(port=0)
-        gmail_service = build('gmail', 'v1', credentials=creds)
-        calendar_service = build('calendar', 'v3', credentials=creds)
-        return gmail_service, calendar_service
-    except Exception as e:
-        st.error(f"Authentication failed: {e}")
-        return None, None
+
+    # Step 3: Show the link for manual code copy-paste
+    auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline', include_granted_scopes='true')
+    st.markdown(f"""
+    1. Click [this link]({auth_url}) to authorize access  
+    2. After signing in, you'll be redirected back to the app  
+    3. If redirect doesn't auto-complete, copy the full URL and paste below
+    """)
+    
+    code_url = st.text_input("Paste the full redirect URL here:")
+    if code_url:
+        try:
+            code = parse_qs(urlparse(code_url).query)['code'][0]
+            flow.fetch_token(code=code)
+            creds = flow.credentials
+            
+            # Store refresh token for future runs
+            st.session_state['temp_creds'] = {
+                'token': creds.token,
+                'refresh_token': creds.refresh_token,
+                'token_uri': creds.token_uri,
+                'client_id': creds.client_id,
+                'client_secret': creds.client_secret,
+                'scopes': creds.scopes
+            }
+            
+            gmail_service = build('gmail', 'v1', credentials=creds)
+            calendar_service = build('calendar', 'v3', credentials=creds)
+            return gmail_service, calendar_service
+        except Exception as e:
+            st.error(f"Authentication failed: {e}")
+            return None, None
+    
+    return None, None
 
 def get_email_body(msg_payload):
     body = ""
