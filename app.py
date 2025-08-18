@@ -1040,7 +1040,6 @@ def send_replies_for_emails(service, calendar_service, emails, df):
     if error_count > 0:
         st.error(f"Failed to send {error_count} replies.")
 
-```python
 def display_classification_tables(processed_emails):
     if not processed_emails:
         st.warning("No emails processed yet.")
