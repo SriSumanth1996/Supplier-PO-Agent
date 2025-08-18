@@ -1040,20 +1040,48 @@ def send_replies_for_emails(service, calendar_service, emails, df):
     if error_count > 0:
         st.error(f"Failed to send {error_count} replies.")
 
-
+```python
 def display_classification_tables(processed_emails):
     if not processed_emails:
         st.warning("No emails processed yet.")
         return
-    quotation_received = [e for e in processed_emails if e['final_classification'] == 'Quotation Received']
-    quotation_partial = [e for e in processed_emails if e['final_classification'] == 'Quotation Partially Received']
-    business_connection = [e for e in processed_emails if e['final_classification'] == 'New Business Connection']
-    unknown = [e for e in processed_emails if e['final_classification'] == 'Unknown']
+    
+    # Extract unique products for dropdown, including 'Product Missing' for emails with missing product
+    unique_products = set()
+    for email in processed_emails:
+        product = email['quotation_data'].get('product', 'Not present')
+        if product == 'Not present':
+            unique_products.add('Product Missing')
+        else:
+            unique_products.add(product)
+    unique_products = sorted(list(unique_products))
+    
+    # Add dropdown in the Quotations tab
     tabs = st.sidebar.radio("Select View", ["Quotations", "New Business Connections"])
     if tabs == "Quotations":
+        selected_product = st.selectbox("Filter by Product", ['All Products'] + unique_products)
+        
+        # Filter emails based on selected product
+        if selected_product == 'All Products':
+            filtered_quotation_received = [e for e in processed_emails if e['final_classification'] == 'Quotation Received']
+            filtered_quotation_partial = [e for e in processed_emails if e['final_classification'] == 'Quotation Partially Received']
+        else:
+            filtered_quotation_received = [
+                e for e in processed_emails 
+                if e['final_classification'] == 'Quotation Received' and 
+                (e['quotation_data'].get('product', 'Not present') == selected_product or 
+                 (selected_product == 'Product Missing' and e['quotation_data'].get('product', 'Not present') == 'Not present'))
+            ]
+            filtered_quotation_partial = [
+                e for e in processed_emails 
+                if e['final_classification'] == 'Quotation Partially Received' and 
+                (e['quotation_data'].get('product', 'Not present') == selected_product or 
+                 (selected_product == 'Product Missing' and e['quotation_data'].get('product', 'Not present') == 'Not present'))
+            ]
+        
         st.header("Complete Quotations Received")
-        if quotation_received:
-            df_complete = create_quotation_received_table(quotation_received)
+        if filtered_quotation_received:
+            df_complete = create_quotation_received_table(filtered_quotation_received)
             edited_df_complete = st.data_editor(
                 df_complete,
                 column_config={
@@ -1076,12 +1104,13 @@ def display_classification_tables(processed_emails):
             )
             if st.button("Send Replies for Selected Complete Quotations"):
                 send_replies_for_emails(st.session_state.gmail_service, st.session_state.calendar_service,
-                                        quotation_received, edited_df_complete)
+                                        filtered_quotation_received, edited_df_complete)
         else:
-            st.info("No complete quotations found in the processed emails.")
+            st.info(f"No complete quotations found for {selected_product}.")
+        
         st.header("Partial Quotations Received")
-        if quotation_partial:
-            df_partial = create_quotation_partial_table(quotation_partial)
+        if filtered_quotation_partial:
+            df_partial = create_quotation_partial_table(filtered_quotation_partial)
             edited_df_partial = st.data_editor(
                 df_partial,
                 column_config={
@@ -1104,11 +1133,13 @@ def display_classification_tables(processed_emails):
             )
             if st.button("Send Replies for Selected Partial Quotations"):
                 send_replies_for_emails(st.session_state.gmail_service, st.session_state.calendar_service,
-                                        quotation_partial, edited_df_partial)
+                                        filtered_quotation_partial, edited_df_partial)
         else:
-            st.info("No partial quotations found in the processed emails.")
+            st.info(f"No partial quotations found for {selected_product}.")
+    
     elif tabs == "New Business Connections":
         st.header("New Business Connections")
+        business_connection = [e for e in processed_emails if e['final_classification'] == 'New Business Connection']
         if business_connection:
             df_business = create_business_connection_table(business_connection)
             edited_df_business = st.data_editor(
@@ -1136,6 +1167,8 @@ def display_classification_tables(processed_emails):
                                         business_connection, edited_df_business)
         else:
             st.info("No new business connection emails found in the processed emails.")
+    
+    unknown = [e for e in processed_emails if e['final_classification'] == 'Unknown']
     if unknown:
         st.header("Unknown/Other Classifications")
         st.warning(f"Found {len(unknown)} emails that could not be properly classified:")
