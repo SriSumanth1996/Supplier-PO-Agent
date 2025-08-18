@@ -1045,14 +1045,16 @@ def display_classification_tables(processed_emails):
         st.warning("No emails processed yet.")
         return
     
-    # Extract unique products for dropdown, including 'Product Missing' for emails with missing product
+    # Extract unique products for dropdown, cleaning "Product or Item:" prefix and handling missing products
     unique_products = set()
     for email in processed_emails:
         product = email['quotation_data'].get('product', 'Not present')
         if product == 'Not present':
             unique_products.add('Product Missing')
         else:
-            unique_products.add(product)
+            # Remove "Product or Item:" prefix if present
+            clean_product = product.replace('Product or Item:', '').strip()
+            unique_products.add(clean_product)
     unique_products = sorted(list(unique_products))
     
     # Add dropdown in the Quotations tab
@@ -1068,13 +1070,13 @@ def display_classification_tables(processed_emails):
             filtered_quotation_received = [
                 e for e in processed_emails 
                 if e['final_classification'] == 'Quotation Received' and 
-                (e['quotation_data'].get('product', 'Not present') == selected_product or 
+                (e['quotation_data'].get('product', 'Not present').replace('Product or Item:', '').strip() == selected_product or 
                  (selected_product == 'Product Missing' and e['quotation_data'].get('product', 'Not present') == 'Not present'))
             ]
             filtered_quotation_partial = [
                 e for e in processed_emails 
                 if e['final_classification'] == 'Quotation Partially Received' and 
-                (e['quotation_data'].get('product', 'Not present') == selected_product or 
+                (e['quotation_data'].get('product', 'Not present').replace('Product or Item:', '').strip() == selected_product or 
                  (selected_product == 'Product Missing' and e['quotation_data'].get('product', 'Not present') == 'Not present'))
             ]
         
