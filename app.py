@@ -121,7 +121,7 @@ def generate_response(query, processed_emails):
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{'role': "user", "content": prompt}],
-            temperature=0.3,
+            temperature=0.2,
             max_tokens=200
         )
         return response.choices[0].message.content.strip() or "No relevant information found."
@@ -289,10 +289,10 @@ def ask_openai(question, context):
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-5",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=200
+            temperature=0.3,
+            max_tokens=250
         )
         return response.choices[0].message.content.strip() or "Not present"
     except Exception as e:
@@ -754,8 +754,8 @@ Guidelines:
    c. If meeting_result is 'outside_business_hours':
       - Inform that the proposed time is outside working hours (9 AM to 5 PM IST).
       - If instructions provide a new valid time:
-          - If confirmation needed: Propose the new time and ask for confirmation.
-          - If scheduling confirmed: Confirm the new time and mention a calendar invite.
+          - If confirmation needed: Propose the new time and ask for confirmation on whether the other party is okay with the date and time proposed by us.
+          - If scheduling confirmed: Confirm and Schedule the meeting at the time stated in the instructions and mention a calendar invite.
       - Else:
           - Ask the sender to suggest a time within business hours.
           Example: "The proposed time is outside our business hours. Please suggest a time between 9 AM and 5 PM IST."
@@ -763,8 +763,8 @@ Guidelines:
       - State that no clear meeting time was proposed.
       - Ask the sender to suggest a specific date and time.
       - If instructions provide a new valid time, then state that no clear meeting was proposed and do the following:
-          - If confirmation needed: Propose the new time and ask for confirmation.
-          - If scheduling confirmed: Confirm the new time and mention a calendar invite.
+          - If confirmation needed: Propose the new time and ask for confirmation on whether the other party is okay with the date and time proposed by us.
+          - If scheduling confirmed: Confirm and Schedule the meeting at the time stated in the instructions and mention a calendar invite.
       Example: "We noticed that no specific time was proposed. Could you please share your availability so we can coordinate?"
    e. If meeting_result is 'proposed_for_confirmation':
       - Propose the time from instructions and ask for confirmation.
@@ -777,7 +777,7 @@ Dr. Saravanan Kesavan
 BITSoM
 
 5. Keep tone professional and polite.
-6. Don't hallucinate or give replies based on examples. Understand the essence and proceed.
+6. DO NOT hallucinate or give replies based on examples. Understand the essence and proceed.
 
 Respond ONLY with the text to be inserted in the email (no extra headings or markers).
 """
