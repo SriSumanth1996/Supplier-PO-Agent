@@ -122,7 +122,7 @@ def generate_response(query, processed_emails):
             model="gpt-4o",
             messages=[{'role': "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=150
+            max_tokens=200
         )
         return response.choices[0].message.content.strip() or "No relevant information found."
     except Exception as e:
@@ -291,7 +291,7 @@ def ask_openai(question, context):
         response = client.chat.completions.create(
             model="gpt-5",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
+            temperature=0.2,
             max_tokens=200
         )
         return response.choices[0].message.content.strip() or "Not present"
@@ -330,7 +330,7 @@ def classify_email_intent(context):
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-5",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=50
@@ -746,16 +746,16 @@ Guidelines:
    b. If meeting_result is 'conflict':
       - State the requested slot is unavailable.
       - If instructions provide a new valid time:
-          - If confirmation needed: Propose the new time and ask for confirmation on whether they are okay with the proposed time by us.
-          - If scheduling confirmed: Confirm the new time, schedule the meeting at the time stated in the instructions and mention a calendar invite.
+          - If confirmation needed: Propose the new time and ask for confirmation.
+          - If scheduling confirmed: Confirm the new time and mention a calendar invite.
       - Else:
           - Ask the sender to suggest another time.
           Example: "The proposed time conflicts with our schedule. Could you please suggest another time that works for you?"
    c. If meeting_result is 'outside_business_hours':
       - Inform that the proposed time is outside working hours (9 AM to 5 PM IST).
       - If instructions provide a new valid time:
-          - If confirmation needed: Propose the new time and ask for confirmation on whether they are okay with the proposed time by us.
-          - If scheduling confirmed: Confirm the new time, schedule the meeting at the time stated in the instructions and mention a calendar invite.
+          - If confirmation needed: Propose the new time and ask for confirmation.
+          - If scheduling confirmed: Confirm the new time and mention a calendar invite.
       - Else:
           - Ask the sender to suggest a time within business hours.
           Example: "The proposed time is outside our business hours. Please suggest a time between 9 AM and 5 PM IST."
@@ -782,7 +782,7 @@ BITSoM
 Respond ONLY with the text to be inserted in the email (no extra headings or markers).
 """
             response = client.chat.completions.create(
-                model="gpt-5",
+                model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=400
