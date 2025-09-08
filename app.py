@@ -119,7 +119,7 @@ def generate_response(query, processed_emails):
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4",
             messages=[{'role': "user", "content": prompt}],
             temperature=0.3,
             max_tokens=150
@@ -281,7 +281,7 @@ def ask_openai(question, context):
     RESPONSE RULES:
     - Extract ONLY explicitly stated info.
     - These responses are fed into a tabular format. So, just return what is asked for.
-    - Do not hallucinate or take from the examples given above in this prompt
+    - DO NOT hallucinate or take from the examples given above in this prompt
     - If not found, respond with "Not present"
     - Keep original format for non-price fields
     - Don't assume or guess, only state exact extracted values
@@ -289,7 +289,7 @@ def ask_openai(question, context):
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=150
@@ -330,7 +330,7 @@ def classify_email_intent(context):
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=50
@@ -372,7 +372,7 @@ def extract_meeting_details(context):
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=200
@@ -647,7 +647,7 @@ def should_schedule_from_instructions(instructions):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=10
@@ -782,7 +782,7 @@ BITSoM
 Respond ONLY with the text to be inserted in the email (no extra headings or markers).
 """
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=400
