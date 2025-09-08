@@ -37,7 +37,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/calendar'
 ]
 qa_mapping = {
-    "What is the product or item being quoted?": "product",
+    "What is the product or item being quoted or mentioned?": "product",
     "How many units or quantity?": "quantity",
     "What is the unit price or price per piece?": "unit_price",
     "What is the total cost or total amount?": "total_cost",
