@@ -1061,7 +1061,7 @@ def display_classification_tables(processed_emails):
                         help="Specify any additional instructions for the reply."
                     )
                 },
-                use_container_width=True,
+                width=True,
                 num_rows="dynamic",
                 hide_index=True
             )
@@ -1089,7 +1089,7 @@ def display_classification_tables(processed_emails):
                         help="Specify any additional instructions for the reply."
                     )
                 },
-                use_container_width=True,
+                width=True,
                 num_rows="dynamic",
                 hide_index=True
             )
@@ -1118,7 +1118,7 @@ def display_classification_tables(processed_emails):
                         help="Specify any additional instructions for the reply."
                     )
                 },
-                use_container_width=True,
+                width=True,
                 num_rows="dynamic",
                 hide_index=True
             )
